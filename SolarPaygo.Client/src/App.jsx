@@ -1,122 +1,193 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useState, useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, NavLink, Navigate } from 'react-router-dom';
+import { Sun, LayoutDashboard, CreditCard, Settings, LogOut } from 'lucide-react';
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
+import { jwtDecode } from 'jwt-decode';
+import './App.css';
 
-function App() {
-  const [count, setCount] = useState(0)
+import Dashboard from './pages/Dashboard';
+import PaymentPortal from './pages/PaymentPortal';
+import Login from './pages/Login';
+import CustomerDashboard from './pages/customer/CustomerDashboard';
 
+const queryClient = new QueryClient();
+
+function AppContent() {
+  const [token, setToken] = useState(localStorage.getItem('token'));
+  const [role, setRole] = useState(null);
+
+  useEffect(() => {
+    if (token) {
+      try {
+        const decoded = jwtDecode(token);
+        // The role claim key varies depending on the backend framework standard
+        const userRole = decoded.role || decoded['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'];
+        setRole(userRole);
+      } catch (err) {
+        console.error('Invalid token', err);
+        handleLogout();
+      }
+    } else {
+      setRole(null);
+    }
+  }, [token]);
+
+  // Fetch admin dashboard data
+  const { data: dashboardData, isLoading: dataLoading, refetch: refreshData } = useQuery({
+    queryKey: ['adminDashboard'],
+    queryFn: async () => {
+      const t = localStorage.getItem('token');
+      if (!t) throw new Error('No token');
+      const response = await fetch('https://localhost:7030/api/dashboard/systems', {
+        headers: { 'Authorization': `Bearer ${t}` }
+      });
+      if (response.ok) {
+        return response.json();
+      } else if (response.status === 401) {
+        handleLogout();
+        throw new Error('Unauthorized');
+      }
+      throw new Error('Network response was not ok');
+    },
+    enabled: !!token && role === 'Admin',
+    refetchInterval: 10000,
+  });
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    setToken(null);
+    setRole(null);
+    queryClient.clear();
+  };
+
+  if (!token) {
+    return (
+      <Routes>
+        <Route path="*" element={<Login setAuthToken={setToken} />} />
+      </Routes>
+    );
+  }
+
+  // Admin Layout
+  if (role === 'Admin') {
+    return (
+      <div className="app-container">
+        <aside className="sidebar">
+          <div className="sidebar-logo">
+            <Sun size={28} className="logo-icon" />
+            <span>SolarPay <span style={{fontWeight: 400}}>PAYGO</span></span>
+          </div>
+          
+          <nav style={{ flex: 1 }}>
+            <ul className="nav-links">
+              <li>
+                <NavLink to="/" className={({isActive}) => isActive ? "nav-item active" : "nav-item"}>
+                  <LayoutDashboard size={20} />
+                  Dashboard
+                </NavLink>
+              </li>
+              <li>
+                <NavLink to="/payments" className={({isActive}) => isActive ? "nav-item active" : "nav-item"}>
+                  <CreditCard size={20} />
+                  Payment Portal
+                </NavLink>
+              </li>
+              <li>
+                <NavLink to="/settings" className={({isActive}) => isActive ? "nav-item active" : "nav-item"}>
+                  <Settings size={20} />
+                  Settings
+                </NavLink>
+              </li>
+            </ul>
+          </nav>
+
+          <button onClick={handleLogout} className="action-btn" style={{ marginTop: 'auto', width: '100%', borderColor: 'var(--border-color)' }}>
+            <LogOut size={16} /> Logout
+          </button>
+        </aside>
+
+        <main className="main-content">
+          <Routes>
+            <Route path="/" element={
+              <Dashboard
+                dashboardData={dashboardData}
+                loading={dataLoading}
+                refreshData={refreshData}
+              />
+            } />
+            <Route path="/payments" element={
+              <PaymentPortal
+                systems={dashboardData ? (dashboardData.systems || dashboardData.Systems || []) : []}
+                systemsLoading={dataLoading}
+                refreshData={refreshData}
+              />
+            } />
+            <Route path="/settings" element={
+              <div className="glass-panel">
+                <h2>Settings</h2>
+                <p style={{color: 'var(--text-muted)', marginTop: '10px'}}>System configuration coming soon.</p>
+              </div>
+            } />
+            <Route path="*" element={<Navigate to="/" />} />
+          </Routes>
+        </main>
+      </div>
+    );
+  }
+
+  // Customer Layout
+  if (role === 'Customer') {
+    return (
+      <div className="app-container">
+        <aside className="sidebar">
+          <div className="sidebar-logo">
+            <Sun size={28} className="logo-icon" />
+            <span>My <span style={{fontWeight: 400}}>SolarPay</span></span>
+          </div>
+          
+          <nav style={{ flex: 1 }}>
+            <ul className="nav-links">
+              <li>
+                <NavLink to="/" className={({isActive}) => isActive ? "nav-item active" : "nav-item"}>
+                  <LayoutDashboard size={20} />
+                  My System
+                </NavLink>
+              </li>
+            </ul>
+          </nav>
+
+          <button onClick={handleLogout} className="action-btn" style={{ marginTop: 'auto', width: '100%', borderColor: 'var(--border-color)' }}>
+            <LogOut size={16} /> Logout
+          </button>
+        </aside>
+
+        <main className="main-content">
+          <Routes>
+            <Route path="/" element={<CustomerDashboard />} />
+            <Route path="*" element={<Navigate to="/" />} />
+          </Routes>
+        </main>
+      </div>
+    );
+  }
+
+  // Fallback if role is not recognized
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+    <div style={{ padding: '20px', color: 'white' }}>
+      <h2>Loading or Unauthorized...</h2>
+      <button onClick={handleLogout} className="action-btn">Logout</button>
+    </div>
+  );
 }
 
-export default App
+function App() {
+  return (
+    <Router>
+      <QueryClientProvider client={queryClient}>
+        <AppContent />
+      </QueryClientProvider>
+    </Router>
+  );
+}
+
+export default App;

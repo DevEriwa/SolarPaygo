@@ -1,0 +1,328 @@
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using SolarPaygo.Api.Data;
+using SolarPaygo.Api.Models;
+using SolarPaygo.Api.Services;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+
+namespace SolarPaygo.Api.Controllers
+{
+    [Authorize]
+    [Route("api/[controller]")]
+    [ApiController]
+    public class DashboardController : ControllerBase
+    {
+        private readonly SolarDbContext _context;
+        private readonly ISquadService _squadService;
+        private readonly IStronVendingService _vendingService;
+        private readonly ILogger<DashboardController> _logger;
+
+        public DashboardController(
+            SolarDbContext context, 
+            ISquadService squadService, 
+            IStronVendingService vendingService,
+            ILogger<DashboardController> logger)
+        {
+            _context = context;
+            _squadService = squadService;
+            _vendingService = vendingService;
+            _logger = logger;
+        }
+
+        // 1. Fetch Systems (and sync live metrics + apply hybrid billing in the process)
+        [Authorize(Roles = "Admin")]
+        [HttpGet("systems")]
+        public async Task<IActionResult> GetDashboardSummary()
+        {
+            var systems = await _context.SolarSystems.ToListAsync();
+            
+            // Sync each system sequentially because DbContext is not thread-safe for parallel operations
+            foreach (var sys in systems)
+            {
+                await SyncSystemAndApplyBilling(sys);
+            }
+            
+            await _context.SaveChangesAsync();
+
+            // Calculate today's revenue
+            var today = DateTime.UtcNow.Date;
+            var revenueToday = await _context.Transactions
+                .Where(t => t.Status == "Completed" && t.TransactionDate >= today)
+                .SumAsync(t => t.AmountPaid);
+                
+            // Get recent payments
+            var recentPayments = await _context.Transactions
+                .Include(t => t.SolarSystem)
+                .Where(t => t.Status == "Completed")
+                .OrderByDescending(t => t.TransactionDate)
+                .Take(10)
+                .Select(t => new {
+                    t.Id,
+                    HardwareId = t.SolarSystem!.HardwareId,
+                    StronMeterId = t.SolarSystem!.StronMeterId,
+                    t.AmountPaid,
+                    t.UnitsAdded,
+                    t.StsToken,
+                    t.TransactionDate
+                })
+                .ToListAsync();
+
+            return Ok(new {
+                Systems = systems,
+                RevenueToday = revenueToday,
+                RecentPayments = recentPayments
+            });
+        }
+
+        // Helper: Syncs live Stron telemetry, calculates hybrid time & energy billing, and applies locks/unlocks
+        private async Task SyncSystemAndApplyBilling(SolarSystem sys)
+        {
+            if (string.IsNullOrWhiteSpace(sys.StronMeterId)) return;
+
+            // 1. Call Stron live API to get the current meter status
+            var status = await _vendingService.QueryMeterStatusAsync(sys.StronMeterId, DateTime.UtcNow);
+            if (status == null) return;
+
+            // Update live telemetry data
+            sys.Voltage = status.Voltage;
+            sys.Current = status.Current;
+            sys.Power = status.Power;
+            sys.CoverState = status.CoverState;
+
+            // 2. Perform Billing calculations if it has been synced before
+            DateTime now = DateTime.UtcNow;
+            if (sys.LastSyncTime.HasValue)
+            {
+                double hoursElapsed = (now - sys.LastSyncTime.Value).TotalHours;
+                
+                // Track kWh difference
+                decimal kwhUsed = status.CumulativeConsumption - sys.LastSyncKwh;
+                if (kwhUsed < 0) kwhUsed = 0; // Handle meter resets
+
+                if (hoursElapsed > 0.01 || kwhUsed > 0) // Only bill if significant time (e.g. > 36 seconds) or usage occurred
+                {
+                    // Rate is ₦2,500/kWh base, ₦1,250/kWh (50% discount) if cumulative > 500 kWh
+                    decimal rate = sys.CumulativeKwhConsumed >= 500m ? 1250m : 2500m;
+
+                    // Pricing rules: max of energy charge (with 0.3 kWh floor) and time charge (₦313/hr)
+                    decimal billingEnergy = Math.Max(kwhUsed, 0.3m);
+                    decimal energyCharge = billingEnergy * rate;
+                    decimal timeCharge = (decimal)hoursElapsed * 313m;
+                    decimal finalCharge = Math.Max(energyCharge, timeCharge);
+
+                    // Deduct from prepaid cash balance
+                    sys.PrepaidNairaBalance -= finalCharge;
+                    if (sys.PrepaidNairaBalance < 0) sys.PrepaidNairaBalance = 0;
+
+                    // Deduct actual kWh from available units
+                    sys.AvailableUnits -= kwhUsed;
+                    if (sys.AvailableUnits < 0) sys.AvailableUnits = 0;
+
+                    // Update historical cumulative consumption
+                    sys.CumulativeKwhConsumed += kwhUsed;
+
+                    // Update sync markers
+                    sys.LastSyncTime = now;
+                    sys.LastSyncKwh = status.CumulativeConsumption;
+
+                    // Enforce lock if prepaid balance or units are fully depleted
+                    if (sys.PrepaidNairaBalance <= 0 || sys.AvailableUnits <= 0)
+                    {
+                        if (sys.Status != "Locked")
+                        {
+                            sys.Status = "Locked";
+                            sys.RelayState = "0"; // Relay off
+                            await _vendingService.SetRemoteSwitchAsync(sys.StronMeterId, turnOn: false);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                // First sync initialization
+                sys.LastSyncTime = now;
+                sys.LastSyncKwh = status.CumulativeConsumption;
+            }
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpGet("systems/{id}")]
+        public async Task<IActionResult> GetSystemDetails(int id)
+        {
+            var system = await _context.SolarSystems.FindAsync(id);
+            if (system == null) return NotFound();
+
+            // Sync this specific system before returning details
+            await SyncSystemAndApplyBilling(system);
+            await _context.SaveChangesAsync();
+
+            var logs = await _context.UsageLogs
+                .Where(l => l.SolarSystemId == id)
+                .OrderByDescending(l => l.Timestamp)
+                .Take(20)
+                .ToListAsync();
+
+            var transactions = await _context.Transactions
+                .Where(t => t.SolarSystemId == id)
+                .OrderByDescending(t => t.TransactionDate)
+                .Take(10)
+                .ToListAsync();
+
+            return Ok(new { System = system, RecentUsage = logs, RecentTransactions = transactions });
+        }
+
+        // New endpoint for Customers to fetch only their system
+        [Authorize(Roles = "Customer")]
+        [HttpGet("my-system")]
+        public async Task<IActionResult> GetMySystem()
+        {
+            var systemIdClaim = User.Claims.FirstOrDefault(c => c.Type == "SystemId")?.Value;
+            if (string.IsNullOrEmpty(systemIdClaim) || !int.TryParse(systemIdClaim, out int systemId))
+            {
+                return Unauthorized();
+            }
+
+            var system = await _context.SolarSystems.FindAsync(systemId);
+            if (system == null) return NotFound();
+
+            // Sync this specific system
+            await SyncSystemAndApplyBilling(system);
+            await _context.SaveChangesAsync();
+
+            var logs = await _context.UsageLogs
+                .Where(l => l.SolarSystemId == systemId)
+                .OrderByDescending(l => l.Timestamp)
+                .Take(20)
+                .ToListAsync();
+
+            var transactions = await _context.Transactions
+                .Where(t => t.SolarSystemId == systemId)
+                .OrderByDescending(t => t.TransactionDate)
+                .Take(10)
+                .ToListAsync();
+
+            return Ok(new { System = system, RecentUsage = logs, RecentTransactions = transactions });
+        }
+
+        // 2. Custom Registration Payload including Customer Info and Meter ID
+        public class RegisterSystemRequest
+        {
+            public string HardwareId { get; set; } = string.Empty;
+            public string OwnerName { get; set; } = string.Empty;
+            public string StronMeterId { get; set; } = string.Empty;
+            public string CustomerEmail { get; set; } = string.Empty;
+            public string CustomerPhone { get; set; } = string.Empty;
+            public string CustomerBvn { get; set; } = string.Empty;
+            public string CustomerDob { get; set; } = "1990-01-01";
+            public string CustomerAddress { get; set; } = "Lagos, Nigeria";
+            public string CustomerGender { get; set; } = "1"; // Male
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpPost("register")]
+        public async Task<IActionResult> RegisterDevice([FromBody] RegisterSystemRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.HardwareId))
+                return BadRequest("HardwareId is required.");
+
+            var existing = await _context.SolarSystems.FirstOrDefaultAsync(s => s.HardwareId == request.HardwareId);
+            if (existing != null)
+                return Ok(existing);
+
+            // Generate dedicated Squad Virtual Account for bank transfer payments
+            _logger.LogInformation($"[Register] Registering customer and generating Squad virtual account for {request.OwnerName}");
+            
+            var squadAccount = await _squadService.CreateVirtualAccountAsync(
+                request.HardwareId,
+                GetFirstName(request.OwnerName),
+                GetLastName(request.OwnerName),
+                request.CustomerEmail,
+                request.CustomerPhone,
+                request.CustomerBvn,
+                request.CustomerDob,
+                request.CustomerAddress,
+                request.CustomerGender
+            );
+
+            var newSystem = new SolarSystem
+            {
+                HardwareId = request.HardwareId,
+                OwnerName = request.OwnerName,
+                StronMeterId = request.StronMeterId,
+                VirtualAccountNumber = squadAccount?.VirtualAccountNumber,
+                VirtualBankName = squadAccount?.BankName ?? "Guaranty Trust Bank (Squad)",
+                CustomerEmail = request.CustomerEmail,
+                CustomerPhone = request.CustomerPhone,
+                CustomerBvn = request.CustomerBvn,
+                Status = "Active",
+                AvailableUnits = 2.0M, // Default free 2 kWh units
+                PrepaidNairaBalance = 5000M, // Seed with default balance
+                CumulativeKwhConsumed = 0m,
+                LastSyncTime = DateTime.UtcNow,
+                LastSyncKwh = 0m
+            };
+
+            _context.SolarSystems.Add(newSystem);
+            await _context.SaveChangesAsync();
+
+            return Ok(newSystem);
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpPost("systems/{id}/disable")]
+        public async Task<IActionResult> DisableSystem(int id)
+        {
+            var system = await _context.SolarSystems.FindAsync(id);
+            if (system == null) return NotFound();
+
+            system.Status = "Disabled";
+            system.RelayState = "0";
+            if (!string.IsNullOrWhiteSpace(system.StronMeterId))
+            {
+                await _vendingService.SetRemoteSwitchAsync(system.StronMeterId, turnOn: false);
+            }
+
+            await _context.SaveChangesAsync();
+            return Ok(system);
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpPost("systems/{id}/enable")]
+        public async Task<IActionResult> EnableSystem(int id)
+        {
+            var system = await _context.SolarSystems.FindAsync(id);
+            if (system == null) return NotFound();
+
+            system.Status = system.PrepaidNairaBalance > 0 && system.AvailableUnits > 0 ? "Active" : "Locked";
+            system.RelayState = system.Status == "Active" ? "1" : "0";
+            
+            if (!string.IsNullOrWhiteSpace(system.StronMeterId))
+            {
+                await _vendingService.SetRemoteSwitchAsync(system.StronMeterId, turnOn: system.Status == "Active");
+            }
+
+            await _context.SaveChangesAsync();
+            return Ok(system);
+        }
+
+        // Helper Split Name Methods for Squad Model
+        private string GetFirstName(string fullName)
+        {
+            if (string.IsNullOrWhiteSpace(fullName)) return "Customer";
+            var parts = fullName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            return parts.Length > 0 ? parts[0] : "Customer";
+        }
+
+        private string GetLastName(string fullName)
+        {
+            if (string.IsNullOrWhiteSpace(fullName)) return "User";
+            var parts = fullName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            return parts.Length > 1 ? parts[parts.Length - 1] : "User";
+        }
+    }
+}
