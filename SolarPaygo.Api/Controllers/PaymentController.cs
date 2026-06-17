@@ -55,8 +55,8 @@ namespace SolarPaygo.Api.Controllers
 
             string secretKey = _configuration["Squad:SecretKey"] ?? "sandbox_sk_squad_test_key_123456";
 
-            // Verify signature (allow a test bypass string for manual curl tests if desired)
-            if (signature != "test-bypass-sig" && !VerifySquadSignature(rawBody, signature, secretKey))
+            // Verify signature using Squad v2/v3 six-field pipe-separated HMAC-SHA512
+            if (!VerifySquadSignature(rawBody, signature, secretKey))
             {
                 _logger.LogWarning("Squad webhook signature verification failed.");
                 return BadRequest("Invalid signature.");
@@ -222,26 +222,23 @@ namespace SolarPaygo.Api.Controllers
             decimal rate = system.CumulativeKwhConsumed >= 500 ? 1250m : 2500m;
             decimal unitsToReceive = amountPaid / rate;
 
-            // Generate Stron STE18-G Prepaid Meter STS Token
-            string stsToken = "MOCK-TOKEN-GENERATION-ERROR";
-            decimal actualUnitsVended = unitsToReceive;
+            // Require a linked Stron Meter ID — no meter, no token
+            if (string.IsNullOrWhiteSpace(system.StronMeterId))
+            {
+                _logger.LogWarning("[ProcessPayment] Solar system {Id} has no Stron Meter ID configured.", system.Id);
+                return (false, "Configuration error: No meter ID is linked to this solar system. Please contact your administrator to complete the setup before making a payment.", null, null);
+            }
 
-            if (!string.IsNullOrWhiteSpace(system.StronMeterId))
+            // Call Stron API to generate a real STS vending token
+            var vendResult = await _vendingService.GenerateVendingTokenAsync(system.StronMeterId, unitsToReceive, isVendByUnit: true);
+            if (vendResult == null)
             {
-                // Call Stron API using units
-                var vendResult = await _vendingService.GenerateVendingTokenAsync(system.StronMeterId, unitsToReceive, isVendByUnit: true);
-                if (vendResult != null)
-                {
-                    stsToken = vendResult.Token;
-                    actualUnitsVended = vendResult.Units;
-                }
+                _logger.LogError("[ProcessPayment] Stron API returned no token for meter {MeterId}. Aborting transaction — no money will be deducted.", system.StronMeterId);
+                return (false, "Payment could not be completed: The meter vending server is temporarily unavailable. Your account has NOT been charged. Please try again in a few minutes or contact support.", null, null);
             }
-            else
-            {
-                // If there's no Stron meter ID, generate a standard mock token
-                var random = new Random();
-                stsToken = $"{random.Next(1000, 9999)}-{random.Next(1000, 9999)}-{random.Next(1000, 9999)}-{random.Next(1000, 9999)}-{random.Next(1000, 9999)}";
-            }
+
+            string stsToken = vendResult.Token;
+            decimal actualUnitsVended = vendResult.Units;
 
             // Update database records
             var transaction = new Transaction
@@ -287,7 +284,7 @@ namespace SolarPaygo.Api.Controllers
                 using var jsonDoc = JsonDocument.Parse(rawJson);
                 var root = jsonDoc.RootElement;
 
-                // Extract fields preserving exact textual representation
+                // Extract the six fields required by Squad webhook v2/v3
                 string txRef = root.GetProperty("transaction_reference").GetString() ?? "";
                 string vaNum = root.GetProperty("virtual_account_number").GetString() ?? "";
                 string currency = root.GetProperty("currency").GetString() ?? "";
@@ -295,20 +292,21 @@ namespace SolarPaygo.Api.Controllers
                 string settledAmount = root.GetProperty("settled_amount").GetString() ?? "";
                 string customerId = root.GetProperty("customer_identifier").GetString() ?? "";
 
+                // Squad v2/v3 signature: six fields joined with pipe separators
                 // Format: transaction_reference|virtual_account_number|currency|principal_amount|settled_amount|customer_identifier
                 string dataToHash = $"{txRef}|{vaNum}|{currency}|{principalAmount}|{settledAmount}|{customerId}";
-                
+
                 string computedHash = GenerateHmacSHA512(dataToHash, secretKey);
-                
-                _logger.LogDebug($"[Signature] Data string: {dataToHash}");
-                _logger.LogDebug($"[Signature] Computed: {computedHash}");
-                _logger.LogDebug($"[Signature] Expected: {expectedSignature}");
+
+                _logger.LogDebug("[Signature] Data string: {Data}", dataToHash);
+                _logger.LogDebug("[Signature] Computed:  {Computed}", computedHash);
+                _logger.LogDebug("[Signature] Expected:  {Expected}", expectedSignature);
 
                 return computedHash.Equals(expectedSignature, StringComparison.OrdinalIgnoreCase);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error validating Squad webhook signature");
+                _logger.LogError(ex, "[Signature] Error validating Squad webhook signature.");
                 return false;
             }
         }

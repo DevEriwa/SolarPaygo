@@ -11,7 +11,7 @@ builder.Services.AddControllers();
 // builder.Services.AddOpenApi(); // Requires Microsoft.AspNetCore.OpenApi package
 builder.Services.AddHttpClient();
 
-builder.Services.AddScoped<IEmailService, MockEmailService>();
+builder.Services.AddScoped<IEmailService, SmtpEmailService>();
 builder.Services.AddScoped<ISquadService, SquadService>();
 builder.Services.AddScoped<IStronVendingService, StronVendingService>();
 builder.Services.AddHostedService<LowBalanceMonitorService>();

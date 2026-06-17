@@ -46,7 +46,7 @@ namespace SolarPaygo.Api.Controllers
                 
             if (system != null)
             {
-                return Ok(new { Token = GenerateJwtToken(system.CustomerEmail, "Customer", system.Id) });
+                return Ok(new { Token = GenerateJwtToken(system.CustomerEmail ?? string.Empty, "Customer", system.Id) });
             }
 
             return Unauthorized("Invalid credentials");

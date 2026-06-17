@@ -27,7 +27,7 @@ namespace SolarPaygo.Api.Services
             var company = _configuration["Stron:CompanyName"] ?? "IdiascoIntegrated";
             var user = _configuration["Stron:UserName"] ?? "SimonLgbinedion";
             var pass = _configuration["Stron:PassWord"] ?? "123456";
-            var baseUrl = _configuration["Stron:BaseUrl"] ?? "http://www.server-newr.stronpower.com";
+            var baseUrl = _configuration["Stron:BaseUrl"] ?? "https://server-newa.stronpower.com";
             return (company, user, pass, baseUrl);
         }
 
@@ -36,7 +36,7 @@ namespace SolarPaygo.Api.Services
             var config = GetConfig();
             try
             {
-                _logger.LogInformation($"[Stron] Generating token for Meter ID: {meterId}, amount/unit: {amount}");
+                _logger.LogInformation("[Stron] Generating token for Meter ID: {MeterId}, amount/unit: {Amount}", meterId, amount);
 
                 var payload = new
                 {
@@ -44,19 +44,20 @@ namespace SolarPaygo.Api.Services
                     UserName = config.User,
                     PassWord = config.Pass,
                     MeterID = meterId,
-                    is_vend_by_unit = isVendByUnit ? "1" : "0",
+                    is_vend_by_unit = isVendByUnit ? "true" : "false",
                     Amount = amount.ToString("F2")
                 };
 
-                var response = await _httpClient.PostAsJsonAsync($"{config.BaseUrl.TrimEnd('/')}/api/VendingMeter", payload);
+                var response = await _httpClient.PostAsJsonAsync($"{config.BaseUrl.TrimEnd('/')}/api/VendingMeterRemotely", payload);
+
                 if (response.IsSuccessStatusCode)
                 {
                     var results = await response.Content.ReadFromJsonAsync<List<CreditInformationViewModel>>();
                     if (results != null && results.Count > 0)
                     {
                         var res = results[0];
-                        _logger.LogInformation($"[Stron] Successfully generated token: {res.Token} ({res.Unit} kWh)");
-                        
+                        _logger.LogInformation("[Stron] Successfully generated token: {Token} ({Unit} kWh)", res.Token, res.Unit);
+
                         decimal.TryParse(res.Unit, out var unitDecimal);
                         decimal.TryParse(res.Price, out var priceDecimal);
 
@@ -67,26 +68,31 @@ namespace SolarPaygo.Api.Services
                             Price = priceDecimal
                         };
                     }
-                }
 
-                var err = await response.Content.ReadAsStringAsync();
-                _logger.LogWarning($"[Stron] Vending failed: Status={response.StatusCode}, Error={err}");
+                    var emptyErr = await response.Content.ReadAsStringAsync();
+                    _logger.LogWarning("[Stron] Vending returned success status but empty result list. Raw: {Raw}", emptyErr);
+                }
+                else
+                {
+                    var err = await response.Content.ReadAsStringAsync();
+                    _logger.LogWarning("[Stron] Vending failed: Status={Status}, Error={Error}", response.StatusCode, err);
+                }
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogError(ex, "[Stron] Network error contacting Stron API for meter {MeterId}. The meter server may be offline.", meterId);
+            }
+            catch (TaskCanceledException ex)
+            {
+                _logger.LogError(ex, "[Stron] Request to Stron API timed out for meter {MeterId}.", meterId);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "[Stron] Vending exception");
+                _logger.LogError(ex, "[Stron] Unexpected error during vending for meter {MeterId}.", meterId);
             }
 
-            // FALLBACK MOCK
-            _logger.LogInformation("[Stron] Falling back to generating a mock STS token.");
-            var random = new Random();
-            var mockToken = $"{random.Next(1000, 9999)}-{random.Next(1000, 9999)}-{random.Next(1000, 9999)}-{random.Next(1000, 9999)}-{random.Next(1000, 9999)}";
-            return new StronVendingResponse
-            {
-                Token = mockToken,
-                Units = isVendByUnit ? amount : (amount / 2500m), // Use ₦2500 per kWh
-                Price = 2500m
-            };
+            // Return null — no mock fallback. Caller must handle null as a hard failure and reject the transaction.
+            return null;
         }
 
         public async Task<StronMeterStatusResponse?> QueryMeterStatusAsync(string meterId, DateTime date)
@@ -104,54 +110,60 @@ namespace SolarPaygo.Api.Services
                 };
 
                 var response = await _httpClient.PostAsJsonAsync($"{config.BaseUrl.TrimEnd('/')}/api/QueryDailySinglePhaseMeter", payload);
+                var rawResult = await response.Content.ReadAsStringAsync();
+
                 if (response.IsSuccessStatusCode)
                 {
-                    var results = await response.Content.ReadFromJsonAsync<List<SinglePhaseDaliyInformationViewModel>>();
-                    if (results != null && results.Count > 0)
+                    try
                     {
-                        var res = results[0];
-                        decimal.TryParse(res.Residual_Amount, out var residual);
-                        decimal.TryParse(res.Cumulative_Total_Consumption, out var cumulative);
-                        decimal.TryParse(res.Voltage, out var voltage);
-                        decimal.TryParse(res.Current, out var current);
-                        decimal.TryParse(res.Power, out var power);
-
-                        return new StronMeterStatusResponse
+                        var results = JsonSerializer.Deserialize<List<SinglePhaseDaliyInformationViewModel>>(rawResult, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                        if (results != null && results.Count > 0)
                         {
-                            MeterId = res.MeterID,
-                            ResidualAmount = residual,
-                            CumulativeConsumption = cumulative,
-                            Voltage = voltage,
-                            Current = current,
-                            Power = power,
-                            RelayState = res.RelayState,
-                            CoverState = res.CoverState
-                        };
+                            var res = results[0];
+                            decimal.TryParse(res.Residual_Amount, out var residual);
+                            decimal.TryParse(res.Cumulative_Total_Consumption, out var cumulative);
+                            decimal.TryParse(res.Voltage, out var voltage);
+                            decimal.TryParse(res.Current, out var current);
+                            decimal.TryParse(res.Power, out var power);
+
+                            return new StronMeterStatusResponse
+                            {
+                                MeterId = res.MeterID,
+                                ResidualAmount = residual,
+                                CumulativeConsumption = cumulative,
+                                Voltage = voltage,
+                                Current = current,
+                                Power = power,
+                                RelayState = res.RelayState,
+                                CoverState = res.CoverState
+                            };
+                        }
+                    }
+                    catch (Exception jsonEx)
+                    {
+                        _logger.LogWarning("[Stron] Failed to parse meter status JSON. Raw: {Raw}. Error: {Error}", rawResult, jsonEx.Message);
                     }
                 }
+                else
+                {
+                    _logger.LogWarning("[Stron] Meter status query failed: Status={Status}, Raw: {Raw}", response.StatusCode, rawResult);
+                }
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogWarning("[Stron] Network error querying meter {MeterId}: {Message}", meterId, ex.Message);
+            }
+            catch (TaskCanceledException ex)
+            {
+                _logger.LogWarning("[Stron] Meter status query timed out for {MeterId}: {Message}", meterId, ex.Message);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"[Stron] Query exception for meter {meterId}: {ex.Message}");
+                _logger.LogWarning("[Stron] Unexpected error querying meter {MeterId}: {Message}", meterId, ex.Message);
             }
 
-            // FALLBACK MOCK Telemetry
-            var random = new Random();
-            decimal mockVoltage = 228.4m + (decimal)(random.NextDouble() * 3.0);
-            decimal mockCurrent = 0.5m + (decimal)(random.NextDouble() * 1.5);
-            decimal mockPower = mockVoltage * mockCurrent; // W
-
-            return new StronMeterStatusResponse
-            {
-                MeterId = meterId,
-                ResidualAmount = 10.5m, // Placeholders
-                CumulativeConsumption = 150m,
-                Voltage = Math.Round(mockVoltage, 1),
-                Current = Math.Round(mockCurrent, 2),
-                Power = Math.Round(mockPower, 1),
-                RelayState = "1",
-                CoverState = "0"
-            };
+            // Return null — billing sync will skip this system gracefully if the meter is unreachable.
+            return null;
         }
 
         public async Task<bool> SetRemoteSwitchAsync(string meterId, bool turnOn)
@@ -159,7 +171,7 @@ namespace SolarPaygo.Api.Services
             var config = GetConfig();
             try
             {
-                _logger.LogInformation($"[Stron] Remote switch command for meter {meterId}: {(turnOn ? "ON" : "OFF")}");
+                _logger.LogInformation("[Stron] Remote switch command for meter {MeterId}: {Command}", meterId, turnOn ? "ON" : "OFF");
 
                 var payload = new
                 {
@@ -167,23 +179,35 @@ namespace SolarPaygo.Api.Services
                     UserName = config.User,
                     PassWord = config.Pass,
                     MeterId = meterId,
-                    Switch = turnOn ? "1" : "0" // 1 is close (turn ON), 0 is open (turn OFF)
+                    Switch = turnOn ? "on" : "off"
                 };
 
                 var response = await _httpClient.PostAsJsonAsync($"{config.BaseUrl.TrimEnd('/')}/api/RemotelySwitch", payload);
                 if (response.IsSuccessStatusCode)
                 {
                     var result = await response.Content.ReadAsStringAsync();
-                    _logger.LogInformation($"[Stron] Remote switch response: {result}");
+                    _logger.LogInformation("[Stron] Remote switch response for {MeterId}: {Result}", meterId, result);
                     return true;
                 }
+
+                var errBody = await response.Content.ReadAsStringAsync();
+                _logger.LogWarning("[Stron] Remote switch failed for {MeterId}: Status={Status}, Error={Error}", meterId, response.StatusCode, errBody);
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogError(ex, "[Stron] Network error sending remote switch command to meter {MeterId}.", meterId);
+            }
+            catch (TaskCanceledException ex)
+            {
+                _logger.LogError(ex, "[Stron] Remote switch command timed out for meter {MeterId}.", meterId);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"[Stron] Remote switch exception for meter {meterId}");
+                _logger.LogError(ex, "[Stron] Unexpected error during remote switch for meter {MeterId}.", meterId);
             }
 
-            return true; // Return true as a fallback so local state transitions can still be tested
+            // Return false — the caller knows the hardware command did not execute.
+            return false;
         }
 
         private string FormatToken(string token)
