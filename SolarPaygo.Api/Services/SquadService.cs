@@ -33,12 +33,18 @@ namespace SolarPaygo.Api.Services
             string address, 
             string gender)
         {
-            var apiKey = _configuration["Squad:SecretKey"] ?? "sandbox_sk_squad_test_key_123456";
-            var baseUrl = _configuration["Squad:BaseUrl"] ?? "https://sandbox-api-d.squadco.com";
+            var (apiKey, baseUrl) = GetConfig();
+
+            // Validate configuration values before making the call
+            if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(baseUrl))
+            {
+                _logger.LogError("[Squad] Configuration error: ApiKey or BaseUrl is missing. Check appsettings.json.");
+                return null;
+            }
 
             try
             {
-                _logger.LogInformation($"[Squad] Requesting virtual account for customer: {customerIdentifier}");
+                _logger.LogInformation($"[Squad] Requesting virtual account for customer: {customerIdentifier} using BaseUrl={baseUrl}");
 
                 var requestPayload = new
                 {
@@ -51,7 +57,7 @@ namespace SolarPaygo.Api.Services
                     dob = dob,
                     address = address,
                     gender = gender,
-                    beneficiary_account = "4920299492" // Settlement account placeholder
+                    beneficiary_account = "0123456789" // Squad requires a 10-digit settlement account number
                 };
 
                 var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl.TrimEnd('/')}/virtual-account")
@@ -81,22 +87,22 @@ namespace SolarPaygo.Api.Services
                 }
 
                 var errorContent = await response.Content.ReadAsStringAsync();
-                _logger.LogWarning($"[Squad] API returned non-success response: Status={response.StatusCode}, Content={errorContent}");
+                _logger.LogWarning("[Squad] API returned non-success: Status={Status}, Body={Body}", response.StatusCode, errorContent);
+                return null;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "[Squad] Exception occurred while calling Squad Virtual Account API");
             }
 
-            // FALLBACK / MOCK BEHAVIOR: Generate realistic virtual account number for testing
-            _logger.LogInformation("[Squad] Falling back to generating a mock virtual account number.");
-            var random = new Random();
-            var mockAccountNum = "9013" + random.Next(100000, 999999).ToString();
-            return new SquadVirtualAccountResponse
-            {
-                VirtualAccountNumber = mockAccountNum,
-                BankName = "GTBank (Squad Mock)"
-            };
+            return null;
+        }
+        private (string ApiKey, string BaseUrl) GetConfig()
+        {
+            bool useSandbox = _configuration.GetValue<bool>("Squad:UseSandbox");
+            var apiKey = useSandbox ? _configuration["Squad:Sandbox:SecretKey"] : _configuration["Squad:Live:SecretKey"];
+            var baseUrl = useSandbox ? _configuration["Squad:Sandbox:BaseUrl"] : _configuration["Squad:Live:BaseUrl"];
+            return (apiKey ?? string.Empty, baseUrl ?? string.Empty);
         }
     }
 }

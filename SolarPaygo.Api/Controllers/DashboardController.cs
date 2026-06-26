@@ -79,7 +79,7 @@ namespace SolarPaygo.Api.Controllers
             });
         }
 
-        // Helper: Syncs live Stron telemetry, calculates hybrid time & energy billing, and applies locks/unlocks
+        // Helper: Syncs live Stron telemetry, applies overload cutoff, and calculates daily hybrid billing
         private async Task SyncSystemAndApplyBilling(SolarSystem sys)
         {
             if (string.IsNullOrWhiteSpace(sys.StronMeterId)) return;
@@ -94,41 +94,71 @@ namespace SolarPaygo.Api.Controllers
             sys.Power = status.Power;
             sys.CoverState = status.CoverState;
 
-            // 2. Perform Billing calculations if it has been synced before
+            // 2. Enforce Maximum Load Limit
+            if (sys.Power > sys.MaxLoadWatts && sys.Status != "Locked")
+            {
+                _logger.LogWarning("[Overload] System {Id} exceeded {Max}W. Current Power: {Power}W. Locking system.", sys.Id, sys.MaxLoadWatts, sys.Power);
+                sys.Status = "Locked";
+                sys.RelayState = "0";
+                await _vendingService.SetRemoteSwitchAsync(sys.StronMeterId, turnOn: false);
+                return; // Stop billing/processing for this cycle since we just cut it off
+            }
+
+            // 3. Perform Billing calculations if it has been synced before
             DateTime now = DateTime.UtcNow;
             if (sys.LastSyncTime.HasValue)
             {
+                // Reset daily trackers if it is a new day
+                var today = now.Date;
+                if (sys.LastBillingDate != today)
+                {
+                    sys.LastBillingDate = today;
+                    sys.DailyKwhConsumed = 0;
+                    sys.DailyTimeActiveHours = 0;
+                    sys.DailyAmountCharged = 0;
+                }
+
                 double hoursElapsed = (now - sys.LastSyncTime.Value).TotalHours;
                 
                 // Track kWh difference
                 decimal kwhUsed = status.CumulativeConsumption - sys.LastSyncKwh;
                 if (kwhUsed < 0) kwhUsed = 0; // Handle meter resets
 
-                if (hoursElapsed > 0.01 || kwhUsed > 0) // Only bill if significant time (e.g. > 36 seconds) or usage occurred
+                // Only process billing if they actually drew power (used units) or the relay is actively drawing current
+                if (kwhUsed > 0 || sys.Power > 0)
                 {
-                    // Rate is ₦2,500/kWh base, ₦1,250/kWh (50% discount) if cumulative > 500 kWh
-                    decimal rate = sys.CumulativeKwhConsumed >= 500m ? 1250m : 2500m;
-
-                    // Pricing rules: max of energy charge (with 0.3 kWh floor) and time charge (₦313/hr)
-                    decimal billingEnergy = Math.Max(kwhUsed, 0.3m);
-                    decimal energyCharge = billingEnergy * rate;
-                    decimal timeCharge = (decimal)hoursElapsed * 313m;
-                    decimal finalCharge = Math.Max(energyCharge, timeCharge);
-
-                    // Deduct from prepaid cash balance
-                    sys.PrepaidNairaBalance -= finalCharge;
-                    if (sys.PrepaidNairaBalance < 0) sys.PrepaidNairaBalance = 0;
+                    // Increment daily trackers
+                    sys.DailyKwhConsumed += kwhUsed;
+                    sys.DailyTimeActiveHours += (decimal)hoursElapsed;
+                    sys.CumulativeKwhConsumed += kwhUsed;
 
                     // Deduct actual kWh from available units
                     sys.AvailableUnits -= kwhUsed;
                     if (sys.AvailableUnits < 0) sys.AvailableUnits = 0;
 
-                    // Update historical cumulative consumption
-                    sys.CumulativeKwhConsumed += kwhUsed;
+                    // Rate is ₦2,500/kWh base, ₦1,250/kWh (50% discount) if cumulative > 500 kWh
+                    decimal rate = sys.CumulativeKwhConsumed >= 500m ? 1250m : 2500m;
 
-                    // Update sync markers
-                    sys.LastSyncTime = now;
-                    sys.LastSyncKwh = status.CumulativeConsumption;
+                    // A) Calculate energy charge and time charge so far today
+                    decimal energyCharge = sys.DailyKwhConsumed * rate;
+                    decimal timeCharge = sys.DailyTimeActiveHours * 313m;
+                    
+                    // B) The strict minimum charge for the day if ANY power is used is 0.3 kWh worth
+                    decimal minimumDailyCharge = 0.3m * rate;
+
+                    // C) Target daily charge is the highest of the three scenarios
+                    decimal targetDailyCharge = Math.Max(minimumDailyCharge, Math.Max(energyCharge, timeCharge));
+
+                    // D) Deduct the difference between what they SHOULD pay for today and what they ALREADY paid today
+                    decimal amountToDeduct = targetDailyCharge - sys.DailyAmountCharged;
+
+                    if (amountToDeduct > 0)
+                    {
+                        sys.PrepaidNairaBalance -= amountToDeduct;
+                        if (sys.PrepaidNairaBalance < 0) sys.PrepaidNairaBalance = 0;
+                        
+                        sys.DailyAmountCharged += amountToDeduct; // Mark as charged for the day
+                    }
 
                     // Enforce lock if prepaid balance or units are fully depleted
                     if (sys.PrepaidNairaBalance <= 0 || sys.AvailableUnits <= 0)
@@ -141,12 +171,17 @@ namespace SolarPaygo.Api.Controllers
                         }
                     }
                 }
+
+                // Update sync markers
+                sys.LastSyncTime = now;
+                sys.LastSyncKwh = status.CumulativeConsumption;
             }
             else
             {
                 // First sync initialization
                 sys.LastSyncTime = now;
                 sys.LastSyncKwh = status.CumulativeConsumption;
+                sys.LastBillingDate = now.Date;
             }
         }
 
@@ -248,6 +283,11 @@ namespace SolarPaygo.Api.Controllers
                 request.CustomerAddress,
                 request.CustomerGender
             );
+
+            if (squadAccount == null)
+            {
+                return BadRequest("Failed to generate a virtual account with Squad. Please verify customer details and try again.");
+            }
 
             var newSystem = new SolarSystem
             {

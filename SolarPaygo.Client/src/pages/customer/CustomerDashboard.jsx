@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Zap, Activity, Wallet, Copy, CheckCircle2, History } from 'lucide-react';
+import { BASE_URL } from '../../config';
+import * as signalR from '@microsoft/signalr';
 
 export default function CustomerDashboard() {
   const [copied, setCopied] = useState(false);
@@ -13,7 +15,7 @@ export default function CustomerDashboard() {
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['mySystem'],
     queryFn: async () => {
-      const response = await fetch('https://localhost:7030/api/dashboard/my-system', {
+      const response = await fetch(`${BASE_URL}/dashboard/my-system`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (!response.ok) {
@@ -27,6 +29,43 @@ export default function CustomerDashboard() {
     },
     refetchInterval: 10000,
   });
+
+  // SignalR Real-Time Connection
+  useEffect(() => {
+    if (!data || !data.system || !data.system.hardwareId) return;
+
+    // Compute hub URL from BASE_URL (assuming BASE_URL ends with /api)
+    const hubUrl = BASE_URL.replace(/\/api\/?$/, '/hubs/dashboard');
+
+    const connection = new signalR.HubConnectionBuilder()
+      .withUrl(hubUrl)
+      .withAutomaticReconnect()
+      .build();
+
+    connection.start()
+      .then(() => {
+        console.log('Connected to live updates via SignalR');
+        // Join group to receive updates targeted to this hardware ID
+        connection.invoke('SubscribeToSystem', data.system.hardwareId)
+          .catch(err => console.error('Subscription error:', err));
+      })
+      .catch(err => console.error('SignalR Connection Error: ', err));
+
+    connection.on('ReceiveSystemUpdate', () => {
+      console.log('Real-time payment/update event received! Refreshing screen...');
+      refetch(); // Instantly update UI with new balance, units, and transactions
+    });
+
+    return () => {
+      if (connection.state === signalR.HubConnectionState.Connected) {
+        connection.invoke('UnsubscribeFromSystem', data.system.hardwareId)
+          .then(() => connection.stop())
+          .catch(err => console.error(err));
+      } else {
+        connection.stop();
+      }
+    };
+  }, [data?.system?.hardwareId, refetch]);
 
   const handleCopy = (text) => {
     navigator.clipboard.writeText(text);
@@ -43,7 +82,7 @@ export default function CustomerDashboard() {
       // We will hit the existing generic buy-units endpoint with the customer's hardware ID
       // Normally, this would be a webhook from Squad/Paystack. 
       // For this test, we reuse the manual top-up endpoint.
-      const response = await fetch('https://localhost:7030/api/payment/buy-units', {
+      const response = await fetch(`${BASE_URL}/payment/buy-units`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 

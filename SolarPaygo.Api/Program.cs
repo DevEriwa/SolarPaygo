@@ -1,29 +1,71 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
 using SolarPaygo.Api.Data;
 using SolarPaygo.Api.Services;
 using System.Text;
+using System.IO;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddControllers();
-// builder.Services.AddOpenApi(); // Requires Microsoft.AspNetCore.OpenApi package
 builder.Services.AddHttpClient();
+
+// Swagger / OpenAPI
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "SolarPaygo API",
+        Version = "v1",
+        Description = "Solar Prepaid Meter Management & Vending API"
+    });
+
+    // Allow Swagger to send JWT Bearer tokens for protected endpoints
+    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Type = SecuritySchemeType.Http,
+        Scheme = "Bearer",
+        BearerFormat = "JWT",
+        In = ParameterLocation.Header,
+        Description = "Enter your JWT token below. Get it by calling POST /api/auth/login first."
+    });
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" }
+            },
+            Array.Empty<string>()
+        }
+    });
+});
 
 builder.Services.AddScoped<IEmailService, SmtpEmailService>();
 builder.Services.AddScoped<ISquadService, SquadService>();
 builder.Services.AddScoped<IStronVendingService, StronVendingService>();
-builder.Services.AddHostedService<LowBalanceMonitorService>();
+builder.Services.AddScoped<ISmsService, LoggingSmsService>();
+// builder.Services.AddHostedService<LowBalanceMonitorService>();
 
-builder.Services.AddCors(options => {
-    options.AddPolicy("AllowAll", policy => {
-        policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader();
+builder.Services.AddSignalR();
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAll", policy =>
+    {
+        policy.SetIsOriginAllowed(origin => true)
+              .AllowAnyMethod()
+              .AllowAnyHeader()
+              .AllowCredentials();
     });
 });
-
 builder.Services.AddDbContext<SolarDbContext>(options =>
-    options.UseSqlite("Data Source=solarpaygo.db"));
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -45,17 +87,41 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<SolarDbContext>();
+    if (app.Environment.IsDevelopment())
+    {
+        // One‑time DB reset: check for marker file
+        var markerPath = Path.Combine(AppContext.BaseDirectory, "db_reset_done.marker");
+        if (!File.Exists(markerPath))
+        {
+            // Delete all tables & data
+            db.Database.EnsureDeleted();
+            // Create marker to prevent future resets
+            File.WriteAllText(markerPath, "Database reset completed at " + DateTime.UtcNow);
+        }
+    }
+    // Ensure schema exists (creates tables if missing)
     db.Database.EnsureCreated();
-
-    // Database is ensured to be created, but we no longer seed dummy data for production
 }
 
-// OpenApi/Swagger removed (package not available offline)
-// To re-enable: add Microsoft.AspNetCore.OpenApi package and uncomment app.MapOpenApi();
+// Enable Swagger UI in Development for debugging
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI(c =>
+    {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "SolarPaygo API v1");
+        c.RoutePrefix = "swagger";
+        c.DisplayRequestDuration();
+        c.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.List);
+    });
+}
 
+
+app.UseRouting();
 app.UseCors("AllowAll");
-app.UseHttpsRedirection();
+// app.UseCors("DevCors"); // removed earlier line
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+app.MapHub<SolarPaygo.Api.Hubs.DashboardHub>("/hubs/dashboard");
 app.Run();

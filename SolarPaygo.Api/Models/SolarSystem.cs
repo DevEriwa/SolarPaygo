@@ -24,6 +24,13 @@ namespace SolarPaygo.Api.Models
         public DateTime? LastSyncTime { get; set; }
         public decimal LastSyncKwh { get; set; }
 
+        // Daily Watermark Billing & Overload Fields
+        public int MaxLoadWatts { get; set; } = 400; // Configurable max load threshold
+        public DateTime? LastBillingDate { get; set; }
+        public decimal DailyKwhConsumed { get; set; }
+        public decimal DailyTimeActiveHours { get; set; }
+        public decimal DailyAmountCharged { get; set; }
+
         // Live Telemetry (Synced from Stron Meter)
         public decimal Voltage { get; set; } = 230; // V (default)
         public decimal Current { get; set; } // A

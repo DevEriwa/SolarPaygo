@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Lock, Unlock, MinusCircle, CreditCard, Plus, Activity, User, ShieldAlert, BadgeCheck, Phone, Mail, FileText } from 'lucide-react';
+import { BASE_URL } from '../config';
 
 export default function Dashboard({ dashboardData, loading, refreshData }) {
   const [filter, setFilter] = useState('All');
@@ -27,7 +28,7 @@ export default function Dashboard({ dashboardData, loading, refreshData }) {
 
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('https://localhost:7030/api/dashboard/register', {
+      const response = await fetch(`${BASE_URL}/dashboard/register`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -67,7 +68,7 @@ export default function Dashboard({ dashboardData, loading, refreshData }) {
   const handleToggleState = async (id, action) => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`https://localhost:7030/api/dashboard/systems/${id}/${action}`, {
+      const response = await fetch(`${BASE_URL}/dashboard/systems/${id}/${action}`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });

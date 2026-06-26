@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Lock, User } from 'lucide-react';
+import { BASE_URL } from '../config';
 
 export default function Login({ setAuthToken }) {
   const [username, setUsername] = useState('');
@@ -13,7 +14,7 @@ export default function Login({ setAuthToken }) {
     setError('');
     
     try {
-      const response = await fetch('https://localhost:7030/api/auth/login', {
+      const response = await fetch(`${BASE_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })

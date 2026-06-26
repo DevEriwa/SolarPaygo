@@ -77,5 +77,15 @@ namespace SolarPaygo.Api.Controllers
 
             return new JwtSecurityTokenHandler().WriteToken(token);
         }
+
+        [HttpGet("debug/customer/{email}")]
+        public async Task<IActionResult> DebugCustomer(string email)
+        {
+            var system = await _context.SolarSystems
+                .FirstOrDefaultAsync(s => s.CustomerEmail.ToLower() == email.ToLower());
+
+            return system == null ? NotFound() : Ok(system);
+        }
+
     }
 }

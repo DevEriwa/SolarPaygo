@@ -4,6 +4,7 @@ import { Sun, LayoutDashboard, CreditCard, Settings, LogOut } from 'lucide-react
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { jwtDecode } from 'jwt-decode';
 import './App.css';
+import { BASE_URL } from './config';
 
 import Dashboard from './pages/Dashboard';
 import PaymentPortal from './pages/PaymentPortal';
@@ -38,7 +39,7 @@ function AppContent() {
     queryFn: async () => {
       const t = localStorage.getItem('token');
       if (!t) throw new Error('No token');
-      const response = await fetch('https://localhost:7030/api/dashboard/systems', {
+      const response = await fetch(`${BASE_URL}/dashboard/systems`, {
         headers: { 'Authorization': `Bearer ${t}` }
       });
       if (response.ok) {

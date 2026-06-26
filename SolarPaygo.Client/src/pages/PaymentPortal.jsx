@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { CreditCard, Zap, Landmark, ArrowRight, Clipboard, RefreshCw, HelpCircle } from 'lucide-react';
+import { BASE_URL } from '../config';
 
 export default function PaymentPortal({ systems, systemsLoading, refreshData }) {
   const [selectedSystemId, setSelectedSystemId] = useState('');
@@ -30,7 +31,7 @@ export default function PaymentPortal({ systems, systemsLoading, refreshData }) 
     setSuccessData(null);
 
     try {
-      const response = await fetch('https://localhost:7030/api/payment/simulate-webhook', {
+      const response = await fetch(`${BASE_URL}/payment/simulate-webhook`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

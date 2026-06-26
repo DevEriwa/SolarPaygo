@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -5,6 +6,8 @@ using Microsoft.Extensions.Logging;
 using SolarPaygo.Api.Data;
 using SolarPaygo.Api.Models;
 using SolarPaygo.Api.Services;
+using SolarPaygo.Api.Hubs;
+using Microsoft.AspNetCore.SignalR;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -21,17 +24,26 @@ namespace SolarPaygo.Api.Controllers
         private readonly IStronVendingService _vendingService;
         private readonly IConfiguration _configuration;
         private readonly ILogger<PaymentController> _logger;
+        private readonly IEmailService _emailService;
+        private readonly ISmsService _smsService;
+        private readonly IHubContext<DashboardHub> _hubContext;
 
         public PaymentController(
             SolarDbContext context, 
             IStronVendingService vendingService, 
             IConfiguration configuration, 
-            ILogger<PaymentController> logger)
+            ILogger<PaymentController> logger,
+            IEmailService emailService,
+            ISmsService smsService,
+            IHubContext<DashboardHub> hubContext)
         {
             _context = context;
             _vendingService = vendingService;
             _configuration = configuration;
             _logger = logger;
+            _emailService = emailService;
+            _smsService = smsService;
+            _hubContext = hubContext;
         }
 
         // 1. Squad Webhook Notification Handler
@@ -53,7 +65,10 @@ namespace SolarPaygo.Api.Controllers
             using var reader = new StreamReader(Request.Body);
             string rawBody = await reader.ReadToEndAsync();
 
-            string secretKey = _configuration["Squad:SecretKey"] ?? "sandbox_sk_squad_test_key_123456";
+            bool useSandbox = _configuration.GetValue<bool>("Squad:UseSandbox");
+            string secretKey = useSandbox
+                ? _configuration["Squad:Sandbox:SecretKey"] ?? string.Empty
+                : _configuration["Squad:Live:SecretKey"] ?? string.Empty;
 
             // Verify signature using Squad v2/v3 six-field pipe-separated HMAC-SHA512
             if (!VerifySquadSignature(rawBody, signature, secretKey))
@@ -138,6 +153,7 @@ namespace SolarPaygo.Api.Controllers
             public decimal Amount { get; set; }
         }
 
+        [Authorize(Roles = "Admin")]
         [HttpPost("simulate-webhook")]
         public async Task<IActionResult> SimulateWebhook([FromBody] SimulateWebhookRequest request)
         {
@@ -164,7 +180,10 @@ namespace SolarPaygo.Api.Controllers
             string jsonPayload = JsonSerializer.Serialize(payload);
 
             // Calculate valid signature for this simulation so the verification logic runs exactly
-            string secretKey = _configuration["Squad:SecretKey"] ?? "sandbox_sk_squad_test_key_123456";
+            bool useSandbox = _configuration.GetValue<bool>("Squad:UseSandbox");
+            string secretKey = useSandbox
+                ? _configuration["Squad:Sandbox:SecretKey"] ?? string.Empty
+                : _configuration["Squad:Live:SecretKey"] ?? string.Empty;
             string dataToHash = $"{txRef}|{request.VirtualAccountNumber}|{currency}|{principalAmountStr}|{settledAmountStr}|{customerId}";
             string computedSig = GenerateHmacSHA512(dataToHash, secretKey);
 
@@ -205,6 +224,15 @@ namespace SolarPaygo.Api.Controllers
             if (!decimal.TryParse(amountStr, out var amountPaid) || amountPaid <= 0)
             {
                 return (false, "Invalid amount", null, null);
+            }
+
+            // Prevent duplicate webhook processing (Idempotency check)
+            bool txExists = await _context.Transactions.AnyAsync(t => t.PaymentReference == reference);
+            if (txExists)
+            {
+                _logger.LogInformation("[ProcessPayment] Transaction {Reference} has already been processed. Skipping duplicate webhook to prevent spam.", reference);
+                // Return success so the payment gateway stops retrying, but don't add units or send notifications again.
+                return (true, "Duplicate transaction processed successfully", null, null);
             }
 
             // Find matching Solar System
@@ -271,6 +299,38 @@ namespace SolarPaygo.Api.Controllers
             await _context.SaveChangesAsync();
 
             _logger.LogInformation($"[ProcessPayment] Completed payment: {amountPaid} Naira. Generated STS Token: {stsToken}. Added {actualUnitsVended} kWh.");
+
+            // 1. Email notification
+            if (!string.IsNullOrWhiteSpace(system.CustomerEmail))
+            {
+                string subject = "SolarPayGo Payment Received - STS Token Enclosed";
+                string body = $@"
+                    <h3>Payment Successful</h3>
+                    <p>Dear {system.OwnerName ?? "Customer"},</p>
+                    <p>Your payment of ₦{amountPaid:N2} has been successfully processed.</p>
+                    <p><strong>STS Token:</strong> {stsToken}</p>
+                    <p><strong>Units Added:</strong> {actualUnitsVended:F2} kWh</p>
+                    <p><strong>New Balance:</strong> ₦{system.PrepaidNairaBalance:N2}</p>
+                    <p>Thank you for using SolarPayGo!</p>
+                ";
+                try { await _emailService.SendEmailAsync(system.CustomerEmail, subject, body); }
+                catch (Exception ex) { _logger.LogError(ex, "Failed to send email notification."); }
+            }
+
+            // 2. SMS notification
+            if (!string.IsNullOrWhiteSpace(system.CustomerPhone))
+            {
+                string smsMessage = $"SolarPayGo: Payment of N{amountPaid} received. STS Token: {stsToken}. Units: {actualUnitsVended:F2}kWh. Bal: N{system.PrepaidNairaBalance}";
+                try { await _smsService.SendSmsAsync(system.CustomerPhone, smsMessage); }
+                catch (Exception ex) { _logger.LogError(ex, "Failed to send SMS notification."); }
+            }
+
+            // 3. Real-time Dashboard Update (SignalR)
+            try
+            {
+                await _hubContext.Clients.Group(system.HardwareId).SendAsync("ReceiveSystemUpdate");
+            }
+            catch (Exception ex) { _logger.LogError(ex, "Failed to broadcast SignalR update."); }
 
             return (true, "Success", transaction, system);
         }
