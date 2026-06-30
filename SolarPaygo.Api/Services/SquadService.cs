@@ -33,7 +33,7 @@ namespace SolarPaygo.Api.Services
             string address, 
             string gender)
         {
-            var (apiKey, baseUrl) = GetConfig();
+            var (apiKey, baseUrl, beneficiaryAccount, useSandbox) = GetConfig();
 
             // Validate configuration values before making the call
             if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(baseUrl))
@@ -42,9 +42,16 @@ namespace SolarPaygo.Api.Services
                 return null;
             }
 
+            if (string.IsNullOrWhiteSpace(beneficiaryAccount) || beneficiaryAccount == "REPLACE_WITH_YOUR_GTBANK_10_DIGIT_ACCOUNT")
+            {
+                _logger.LogError("[Squad] Configuration error: BeneficiaryAccount is missing or still a placeholder. Set Squad:Live:BeneficiaryAccount in appsettings.json.");
+                return null;
+            }
+
             try
             {
-                _logger.LogInformation($"[Squad] Requesting virtual account for customer: {customerIdentifier} using BaseUrl={baseUrl}");
+                _logger.LogInformation("[Squad] Requesting virtual account for customer: {CustomerId} | Mode: {Mode} | URL: {Url}",
+                    customerIdentifier, useSandbox ? "SANDBOX" : "LIVE", baseUrl);
 
                 var requestPayload = new
                 {
@@ -54,10 +61,10 @@ namespace SolarPaygo.Api.Services
                     mobile_num = phone,
                     email = email,
                     bvn = bvn,
-                    dob = dob,
+                    dob = dob,             // Already formatted as MM/dd/yyyy by controller
                     address = address,
                     gender = gender,
-                    beneficiary_account = "0123456789" // Squad requires a 10-digit settlement account number
+                    beneficiary_account = beneficiaryAccount  // ✅ Read from config — must be real GTBank account on live
                 };
 
                 var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl.TrimEnd('/')}/virtual-account")
@@ -76,12 +83,13 @@ namespace SolarPaygo.Api.Services
                     {
                         var data = result.GetProperty("data");
                         var accountNum = data.GetProperty("virtual_account_number").GetString();
-                        _logger.LogInformation($"[Squad] Successfully generated virtual account: {accountNum}");
+                        _logger.LogInformation("[Squad] Successfully generated virtual account: {AccountNum}", accountNum);
 
                         return new SquadVirtualAccountResponse
                         {
                             VirtualAccountNumber = accountNum ?? string.Empty,
-                            BankName = "Guaranty Trust Bank (Squad Sandbox)"
+                            // ✅ BankName now correctly shows sandbox vs live label
+                            BankName = useSandbox ? "Guaranty Trust Bank (Squad Sandbox)" : "Guaranty Trust Bank (Squad)"
                         };
                     }
                 }
@@ -97,12 +105,15 @@ namespace SolarPaygo.Api.Services
 
             return null;
         }
-        private (string ApiKey, string BaseUrl) GetConfig()
+
+        private (string ApiKey, string BaseUrl, string BeneficiaryAccount, bool UseSandbox) GetConfig()
         {
             bool useSandbox = _configuration.GetValue<bool>("Squad:UseSandbox");
-            var apiKey = useSandbox ? _configuration["Squad:Sandbox:SecretKey"] : _configuration["Squad:Live:SecretKey"];
-            var baseUrl = useSandbox ? _configuration["Squad:Sandbox:BaseUrl"] : _configuration["Squad:Live:BaseUrl"];
-            return (apiKey ?? string.Empty, baseUrl ?? string.Empty);
+            string env = useSandbox ? "Sandbox" : "Live";
+            var apiKey = _configuration[$"Squad:{env}:SecretKey"];
+            var baseUrl = _configuration[$"Squad:{env}:BaseUrl"];
+            var beneficiaryAccount = _configuration[$"Squad:{env}:BeneficiaryAccount"];
+            return (apiKey ?? string.Empty, baseUrl ?? string.Empty, beneficiaryAccount ?? string.Empty, useSandbox);
         }
     }
 }

@@ -21,17 +21,20 @@ namespace SolarPaygo.Api.Controllers
         private readonly ISquadService _squadService;
         private readonly IStronVendingService _vendingService;
         private readonly ILogger<DashboardController> _logger;
+        private readonly IConfiguration _configuration;
 
         public DashboardController(
             SolarDbContext context, 
             ISquadService squadService, 
             IStronVendingService vendingService,
-            ILogger<DashboardController> logger)
+            ILogger<DashboardController> logger,
+            IConfiguration configuration)
         {
             _context = context;
             _squadService = squadService;
             _vendingService = vendingService;
             _logger = logger;
+            _configuration = configuration;
         }
 
         // 1. Fetch Systems (and sync live metrics + apply hybrid billing in the process)
@@ -244,7 +247,6 @@ namespace SolarPaygo.Api.Controllers
             return Ok(new { System = system, RecentUsage = logs, RecentTransactions = transactions });
         }
 
-        // 2. Custom Registration Payload including Customer Info and Meter ID
         public class RegisterSystemRequest
         {
             public string HardwareId { get; set; } = string.Empty;
@@ -255,22 +257,73 @@ namespace SolarPaygo.Api.Controllers
             public string CustomerBvn { get; set; } = string.Empty;
             public string CustomerDob { get; set; } = "1990-01-01";
             public string CustomerAddress { get; set; } = "Lagos, Nigeria";
-            public string CustomerGender { get; set; } = "1"; // Male
+            public string CustomerGender { get; set; } = ""; // Gender will be selected by user/admin
+
+            // Support snake_case/Squad-style names if sent directly
+            public string? customer_identifier { get; set; }
+            public string? first_name { get; set; }
+            public string? last_name { get; set; }
+            public string? mobile_num { get; set; }
+            public string? email { get; set; }
+            public string? bvn { get; set; }
+            public string? dob { get; set; }
+            public string? address { get; set; }
+            public string? gender { get; set; }
         }
 
         [Authorize(Roles = "Admin")]
         [HttpPost("register")]
         public async Task<IActionResult> RegisterDevice([FromBody] RegisterSystemRequest request)
         {
+            // Normalize alternate/snake_case/Squad request properties
+            if (string.IsNullOrWhiteSpace(request.HardwareId) && !string.IsNullOrWhiteSpace(request.customer_identifier))
+                request.HardwareId = request.customer_identifier;
+            if (string.IsNullOrWhiteSpace(request.OwnerName) && (!string.IsNullOrWhiteSpace(request.first_name) || !string.IsNullOrWhiteSpace(request.last_name)))
+                request.OwnerName = $"{request.first_name} {request.last_name}".Trim();
+            if (string.IsNullOrWhiteSpace(request.CustomerEmail) && !string.IsNullOrWhiteSpace(request.email))
+                request.CustomerEmail = request.email;
+            if (string.IsNullOrWhiteSpace(request.CustomerPhone) && !string.IsNullOrWhiteSpace(request.mobile_num))
+                request.CustomerPhone = request.mobile_num;
+            if (string.IsNullOrWhiteSpace(request.CustomerBvn) && !string.IsNullOrWhiteSpace(request.bvn))
+                request.CustomerBvn = request.bvn;
+            if (string.IsNullOrWhiteSpace(request.CustomerDob) && !string.IsNullOrWhiteSpace(request.dob))
+                request.CustomerDob = request.dob;
+            if (string.IsNullOrWhiteSpace(request.CustomerAddress) && !string.IsNullOrWhiteSpace(request.address))
+                request.CustomerAddress = request.address;
+            if (string.IsNullOrWhiteSpace(request.CustomerGender) && !string.IsNullOrWhiteSpace(request.gender))
+                request.CustomerGender = request.gender;
+
             if (string.IsNullOrWhiteSpace(request.HardwareId))
                 return BadRequest("HardwareId is required.");
+
+            // --- Server-side validation before calling Squad ---
+            if (string.IsNullOrWhiteSpace(request.CustomerGender))
+                return BadRequest("Gender is required. Please select Male or Female.");
+
+            if (string.IsNullOrWhiteSpace(request.CustomerBvn) || request.CustomerBvn.Length != 11)
+                return BadRequest("A valid 11-digit BVN is required.");
+
+            if (string.IsNullOrWhiteSpace(request.CustomerEmail))
+                return BadRequest("Customer email is required.");
+
+            if (string.IsNullOrWhiteSpace(request.CustomerPhone))
+                return BadRequest("Customer phone number is required.");
+
+            if (string.IsNullOrWhiteSpace(request.CustomerDob))
+                return BadRequest("Date of birth is required.");
+
+            // Safe DOB parse — prevents 500 crash on malformed dates
+            if (!DateTime.TryParse(request.CustomerDob, out DateTime parsedDob))
+                return BadRequest($"Invalid date of birth format: '{request.CustomerDob}'. Use YYYY-MM-DD.");
+
+            string formattedDob = parsedDob.ToString("MM/dd/yyyy"); // Squad expects MM/dd/yyyy
 
             var existing = await _context.SolarSystems.FirstOrDefaultAsync(s => s.HardwareId == request.HardwareId);
             if (existing != null)
                 return Ok(existing);
 
             // Generate dedicated Squad Virtual Account for bank transfer payments
-            _logger.LogInformation($"[Register] Registering customer and generating Squad virtual account for {request.OwnerName}");
+            _logger.LogInformation("[Register] Registering customer and generating Squad virtual account for {OwnerName}", request.OwnerName);
             
             var squadAccount = await _squadService.CreateVirtualAccountAsync(
                 request.HardwareId,
@@ -279,14 +332,27 @@ namespace SolarPaygo.Api.Controllers
                 request.CustomerEmail,
                 request.CustomerPhone,
                 request.CustomerBvn,
-                request.CustomerDob,
+                formattedDob,           // ✅ Safe parsed & formatted DOB
                 request.CustomerAddress,
                 request.CustomerGender
             );
 
             if (squadAccount == null)
             {
-                return BadRequest("Failed to generate a virtual account with Squad. Please verify customer details and try again.");
+                bool useSandbox = _configuration.GetValue<bool>("Squad:UseSandbox");
+                if (useSandbox)
+                {
+                    _logger.LogWarning("[Register] Squad Sandbox Virtual Account generation failed (merchant limit reached). Falling back to a simulated account for testing.");
+                    squadAccount = new SquadVirtualAccountResponse
+                    {
+                        VirtualAccountNumber = "999" + new Random().Next(10000000, 99999999).ToString(),
+                        BankName = "Guaranty Trust Bank (Simulated Sandbox)"
+                    };
+                }
+                else
+                {
+                    return BadRequest("Failed to generate a virtual account with Squad. Please verify customer details and try again.");
+                }
             }
 
             var newSystem = new SolarSystem
@@ -299,6 +365,8 @@ namespace SolarPaygo.Api.Controllers
                 CustomerEmail = request.CustomerEmail,
                 CustomerPhone = request.CustomerPhone,
                 CustomerBvn = request.CustomerBvn,
+                CustomerDob = request.CustomerDob,
+                CustomerGender = request.CustomerGender,
                 Status = "Active",
                 AvailableUnits = 2.0M, // Default free 2 kWh units
                 PrepaidNairaBalance = 5000M, // Seed with default balance

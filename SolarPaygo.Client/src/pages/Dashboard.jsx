@@ -13,6 +13,8 @@ export default function Dashboard({ dashboardData, loading, refreshData }) {
   const [regEmail, setRegEmail] = useState('');
   const [regPhone, setRegPhone] = useState('');
   const [regBvn, setRegBvn] = useState('');
+  const [regGender, setRegGender] = useState('');
+  const [regDob, setRegDob] = useState('');
   const [regError, setRegError] = useState(null);
   const [regSuccess, setRegSuccess] = useState(false);
   const [regLoading, setRegLoading] = useState(false);
@@ -28,19 +30,23 @@ export default function Dashboard({ dashboardData, loading, refreshData }) {
 
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${BASE_URL}/dashboard/register`, {
+      const formattedDob = regDob ? new Date(regDob).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }) : '';
+const response = await fetch(`${BASE_URL}/dashboard/register`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
+
         body: JSON.stringify({
           hardwareId: regHardwareId.trim(),
           ownerName: regOwnerName.trim(),
           stronMeterId: regMeterId.trim(),
           customerEmail: regEmail.trim(),
           customerPhone: regPhone.trim(),
-          customerBvn: regBvn.trim()
+          customerBvn: regBvn.trim(),
+          customerDob: formattedDob,
+          customerGender: regGender
         })
       });
 
@@ -52,6 +58,7 @@ export default function Dashboard({ dashboardData, loading, refreshData }) {
         setRegEmail('');
         setRegPhone('');
         setRegBvn('');
+        setRegDob('');
         refreshData(); // Re-fetch shared data in App.jsx
         setTimeout(() => setIsRegisterOpen(false), 2000);
       } else {
@@ -159,6 +166,8 @@ export default function Dashboard({ dashboardData, loading, refreshData }) {
               <th>Squad Virtual Account</th>
               <th>Naira Balance</th>
               <th>Meter Live Telemetry</th>
+              <th>DOB</th>
+              <th>Gender</th>
               <th>Energy Remaining</th>
               <th>Actions</th>
             </tr>
@@ -242,6 +251,12 @@ export default function Dashboard({ dashboardData, loading, refreshData }) {
                       <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Telemetry Offline</span>
                     )}
                   </td>
+
+                  {/* DOB */}
+                  <td>{sys.customerDob ? new Date(sys.customerDob).toLocaleDateString() : 'N/A'}</td>
+                  
+                  {/* Gender */}
+                  <td>{sys.customerGender === "1" ? "Male" : sys.customerGender === "2" ? "Female" : "Other"}</td>
                   
                   {/* Energy units Remaining */}
                   <td>
@@ -274,7 +289,7 @@ export default function Dashboard({ dashboardData, loading, refreshData }) {
               );
             })}
             {filteredSystems.length === 0 && !loading && (
-              <tr><td colSpan="6" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px' }}>No systems match filter.</td></tr>
+              <tr><td colSpan="8" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px' }}>No systems match filter.</td></tr>
             )}
           </tbody>
         </table>
@@ -351,7 +366,26 @@ export default function Dashboard({ dashboardData, loading, refreshData }) {
                 <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Owner Full Name</label>
                 <div style={{ position: 'relative' }}>
                   <User size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
-                  <input required type="text" value={regOwnerName} onChange={(e) => setRegOwnerName(e.target.value)} placeholder="e.g. Olamide Johnson" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white' }} />
+                  <input required type="text" value={regOwnerName} onChange={(e) => setRegOwnerName(e.target.value)} placeholder="e.g. Olamide Johnson" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '1rem' }} />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Date of Birth</label>
+                    <div style={{ position: 'relative' }}>
+                      <input type="date" value={regDob} onChange={(e) => setRegDob(e.target.value)} required style={{ width: '100%', padding: '12px 12px 12px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white' }} />
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Gender</label>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <label>
+                        <input type="radio" name="gender" value="1" checked={regGender === '1'} onChange={() => setRegGender('1')} /> Male
+                      </label>
+                      <label>
+                        <input type="radio" name="gender" value="2" checked={regGender === '2'} onChange={() => setRegGender('2')} /> Female
+                      </label>
+                    </div>
+                  </div>
                 </div>
               </div>
 

@@ -17,6 +17,8 @@ namespace SolarPaygo.Api.Models
         public string? CustomerEmail { get; set; }
         public string? CustomerPhone { get; set; }
         public string? CustomerBvn { get; set; }
+        public string? CustomerDob { get; set; } = "1990-01-01";
+        public string? CustomerGender { get; set; } = "1"; // 1=Male,2=Female,3=Other
 
         // Hybrid Billing Fields
         public decimal PrepaidNairaBalance { get; set; }

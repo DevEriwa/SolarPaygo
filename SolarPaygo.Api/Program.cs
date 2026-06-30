@@ -10,7 +10,12 @@ using System.IO;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.ReadCommentHandling = System.Text.Json.JsonCommentHandling.Skip;
+        options.JsonSerializerOptions.AllowTrailingCommas = true;
+    });
 builder.Services.AddHttpClient();
 
 // Swagger / OpenAPI
