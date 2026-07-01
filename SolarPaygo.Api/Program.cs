@@ -5,11 +5,10 @@ using Microsoft.OpenApi.Models;
 using SolarPaygo.Api.Data;
 using SolarPaygo.Api.Services;
 using System.Text;
-using System.IO;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
+// ====================== Services ======================
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
@@ -18,8 +17,66 @@ builder.Services.AddControllers()
     });
 
 builder.Services.AddHttpClient();
+builder.Services.AddSignalR();
 
-// Swagger / OpenAPI
+builder.Services.AddScoped<IEmailService, SmtpEmailService>();
+builder.Services.AddScoped<ISquadService, SquadService>();
+builder.Services.AddScoped<IStronVendingService, StronVendingService>();
+builder.Services.AddScoped<ISmsService, LoggingSmsService>();
+
+builder.Services.AddDbContext<SolarDbContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+// ====================== CORS (FIXED) ======================
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowFrontend", policy =>
+    {
+        policy.WithOrigins(
+            "https://idiascosolarsystem.co.uk",
+            "https://www.idiascosolarsystem.co.uk",
+            "https://app.idiascosolarsystem.co.uk" 
+        )
+        .AllowAnyMethod()
+        .AllowAnyHeader()
+        .AllowCredentials()
+        .SetIsOriginAllowedToAllowWildcardSubdomains();
+    });
+});
+
+// ====================== Authentication ======================
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = builder.Configuration["Jwt:Issuer"],
+            ValidAudience = builder.Configuration["Jwt:Audience"],
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!)),
+            ClockSkew = TimeSpan.Zero
+        };
+
+        // Important for SignalR with token in query string
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                if (!string.IsNullOrEmpty(accessToken) &&
+                    context.HttpContext.Request.Path.StartsWithSegments("/hubs"))
+                {
+                    context.Token = accessToken;
+                }
+                return Task.CompletedTask;
+            }
+        };
+    });
+
+// Swagger
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
@@ -37,115 +94,40 @@ builder.Services.AddSwaggerGen(c =>
         Scheme = "Bearer",
         BearerFormat = "JWT",
         In = ParameterLocation.Header,
-        Description = "Enter your JWT token below. Get it by calling POST /api/auth/login first."
+        Description = "Enter your JWT token"
     });
 
     c.AddSecurityRequirement(new OpenApiSecurityRequirement
     {
         {
-            new OpenApiSecurityScheme
-            {
-                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" }
-            },
+            new OpenApiSecurityScheme { Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" } },
             Array.Empty<string>()
         }
     });
 });
 
-builder.Services.AddScoped<IEmailService, SmtpEmailService>();
-builder.Services.AddScoped<ISquadService, SquadService>();
-builder.Services.AddScoped<IStronVendingService, StronVendingService>();
-builder.Services.AddScoped<ISmsService, LoggingSmsService>();
-
-builder.Services.AddSignalR();
-
-builder.Services.AddDbContext<SolarDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
-
-// CORS Policy - Secure + Development friendly
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("AllowFrontend", policy =>
-    {
-        var allowedOrigins = new List<string>
-        {
-            "https://idiascosolarsystem.co.uk",
-            "https://www.idiascosolarsystem.co.uk"
-        };
-
-        if (builder.Environment.IsDevelopment())
-        {
-            allowedOrigins.AddRange(new[]
-            {
-                "http://localhost:5173",
-                "http://localhost:3000",
-                "http://127.0.0.1:5173",
-                "http://127.0.0.1:3000"
-            });
-        }
-
-        policy.WithOrigins(allowedOrigins.ToArray())
-              .AllowAnyMethod()
-              .AllowAnyHeader()
-              .AllowCredentials();
-    });
-});
-
-// Authentication
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
-    {
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidateAudience = true,
-            ValidateLifetime = true,
-            ValidateIssuerSigningKey = true,
-            ValidIssuer = builder.Configuration["Jwt:Issuer"],
-            ValidAudience = builder.Configuration["Jwt:Audience"],
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!))
-        };
-    });
-
 var app = builder.Build();
 
-// ====================== Database Initialization ======================
+// ====================== DB ======================
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<SolarDbContext>();
-    if (app.Environment.IsDevelopment())
-    {
-        var markerPath = Path.Combine(AppContext.BaseDirectory, "db_reset_done.marker");
-        if (!File.Exists(markerPath))
-        {
-            db.Database.EnsureDeleted();
-            File.WriteAllText(markerPath, "Database reset completed at " + DateTime.UtcNow);
-        }
-    }
-    db.Database.EnsureCreated();
+    db.Database.EnsureCreated();   // Safer - removed aggressive reset
 }
 
-// ====================== Middleware Pipeline ======================
-
+// ====================== Middleware ======================
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
-    app.UseSwaggerUI(c =>
-    {
-        c.SwaggerEndpoint("/swagger/v1/swagger.json", "SolarPaygo API v1");
-        c.RoutePrefix = "swagger";
-        c.DisplayRequestDuration();
-        c.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.List);
-    });
+    app.UseSwaggerUI();
 }
 else
 {
-    // Force HTTPS in production
     app.UseHttpsRedirection();
 }
 
 app.UseRouting();
-app.UseCors("AllowFrontend");           // ← Secure CORS
+app.UseCors("AllowFrontend");        // Must be before Authentication
 app.UseAuthentication();
 app.UseAuthorization();
 
