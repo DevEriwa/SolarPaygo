@@ -16,6 +16,7 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.ReadCommentHandling = System.Text.Json.JsonCommentHandling.Skip;
         options.JsonSerializerOptions.AllowTrailingCommas = true;
     });
+
 builder.Services.AddHttpClient();
 
 // Swagger / OpenAPI
@@ -29,7 +30,6 @@ builder.Services.AddSwaggerGen(c =>
         Description = "Solar Prepaid Meter Management & Vending API"
     });
 
-    // Allow Swagger to send JWT Bearer tokens for protected endpoints
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         Name = "Authorization",
@@ -39,6 +39,7 @@ builder.Services.AddSwaggerGen(c =>
         In = ParameterLocation.Header,
         Description = "Enter your JWT token below. Get it by calling POST /api/auth/login first."
     });
+
     c.AddSecurityRequirement(new OpenApiSecurityRequirement
     {
         {
@@ -55,23 +56,42 @@ builder.Services.AddScoped<IEmailService, SmtpEmailService>();
 builder.Services.AddScoped<ISquadService, SquadService>();
 builder.Services.AddScoped<IStronVendingService, StronVendingService>();
 builder.Services.AddScoped<ISmsService, LoggingSmsService>();
-// builder.Services.AddHostedService<LowBalanceMonitorService>();
 
 builder.Services.AddSignalR();
 
+builder.Services.AddDbContext<SolarDbContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+// CORS Policy - Secure + Development friendly
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowAll", policy =>
+    options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.SetIsOriginAllowed(origin => true)
+        var allowedOrigins = new List<string>
+        {
+            "https://idiascosolarsystem.co.uk",
+            "https://www.idiascosolarsystem.co.uk"
+        };
+
+        if (builder.Environment.IsDevelopment())
+        {
+            allowedOrigins.AddRange(new[]
+            {
+                "http://localhost:5173",
+                "http://localhost:3000",
+                "http://127.0.0.1:5173",
+                "http://127.0.0.1:3000"
+            });
+        }
+
+        policy.WithOrigins(allowedOrigins.ToArray())
               .AllowAnyMethod()
               .AllowAnyHeader()
               .AllowCredentials();
     });
 });
-builder.Services.AddDbContext<SolarDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
+// Authentication
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -89,26 +109,24 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 var app = builder.Build();
 
+// ====================== Database Initialization ======================
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<SolarDbContext>();
     if (app.Environment.IsDevelopment())
     {
-        // One‑time DB reset: check for marker file
         var markerPath = Path.Combine(AppContext.BaseDirectory, "db_reset_done.marker");
         if (!File.Exists(markerPath))
         {
-            // Delete all tables & data
             db.Database.EnsureDeleted();
-            // Create marker to prevent future resets
             File.WriteAllText(markerPath, "Database reset completed at " + DateTime.UtcNow);
         }
     }
-    // Ensure schema exists (creates tables if missing)
     db.Database.EnsureCreated();
 }
 
-// Enable Swagger UI in Development for debugging
+// ====================== Middleware Pipeline ======================
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -120,13 +138,18 @@ if (app.Environment.IsDevelopment())
         c.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.List);
     });
 }
-
+else
+{
+    // Force HTTPS in production
+    app.UseHttpsRedirection();
+}
 
 app.UseRouting();
-app.UseCors("AllowAll");
-// app.UseCors("DevCors"); // removed earlier line
+app.UseCors("AllowFrontend");           // ← Secure CORS
 app.UseAuthentication();
 app.UseAuthorization();
+
 app.MapControllers();
 app.MapHub<SolarPaygo.Api.Hubs.DashboardHub>("/hubs/dashboard");
+
 app.Run();
