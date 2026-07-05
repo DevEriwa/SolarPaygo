@@ -66,8 +66,10 @@ builder.Services.AddCors(options =>
         var allowedOrigins = new List<string>
         {
             "https://idiascosolarsystem.co.uk",
+             "http://idiascosolarsystem.co.uk",
             "https://www.idiascosolarsystem.co.uk",
-            "https://app.idiascosolarsystem.co.uk"
+            "https://app.idiascosolarsystem.co.uk",
+            "http://app.idiascosolarsystem.co.uk",
         };
 
         if (builder.Environment.IsDevelopment())
@@ -161,5 +163,6 @@ app.UseCors("AllowFrontend");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+app.UseHsts();
 app.MapHub<SolarPaygo.Api.Hubs.DashboardHub>("/hubs/dashboard");
 app.Run();
