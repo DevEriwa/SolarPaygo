@@ -31,9 +31,13 @@ export default function PaymentPortal({ systems, systemsLoading, refreshData }) 
     setSuccessData(null);
 
     try {
+      const token = localStorage.getItem('token');
       const response = await fetch(`${BASE_URL}/payment/simulate-webhook`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
           virtualAccountNumber: selectedSystem.virtualAccountNumber,
           amount: parseFloat(amount)
