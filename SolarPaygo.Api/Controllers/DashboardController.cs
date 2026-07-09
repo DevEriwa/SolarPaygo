@@ -337,7 +337,7 @@ namespace SolarPaygo.Api.Controllers
                 request.CustomerGender
             );
 
-            if (squadAccount == null)
+            if (squadAccount == null || !string.IsNullOrEmpty(squadAccount.ErrorMessage))
             {
                 bool useSandbox = _configuration.GetValue<bool>("Squad:UseSandbox");
                 if (useSandbox)
@@ -351,7 +351,8 @@ namespace SolarPaygo.Api.Controllers
                 }
                 else
                 {
-                    return BadRequest("Failed to generate a virtual account with Squad. Please verify customer details and try again.");
+                    string errMsg = squadAccount?.ErrorMessage ?? "Failed to generate a virtual account with Squad. Please verify customer details and try again.";
+                    return BadRequest(errMsg);
                 }
             }
 

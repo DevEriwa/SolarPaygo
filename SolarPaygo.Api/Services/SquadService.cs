@@ -96,14 +96,31 @@ namespace SolarPaygo.Api.Services
 
                 var errorContent = await response.Content.ReadAsStringAsync();
                 _logger.LogWarning("[Squad] API returned non-success: Status={Status}, Body={Body}", response.StatusCode, errorContent);
-                return null;
+                
+                string userFriendlyError = "Failed to generate virtual account.";
+                try
+                {
+                    using var jsonDoc = JsonDocument.Parse(errorContent);
+                    if (jsonDoc.RootElement.TryGetProperty("message", out var msgProp))
+                    {
+                        userFriendlyError = msgProp.GetString() ?? userFriendlyError;
+                    }
+                }
+                catch {}
+
+                return new SquadVirtualAccountResponse
+                {
+                    ErrorMessage = userFriendlyError
+                };
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "[Squad] Exception occurred while calling Squad Virtual Account API");
+                return new SquadVirtualAccountResponse
+                {
+                    ErrorMessage = ex.Message
+                };
             }
-
-            return null;
         }
 
         private (string ApiKey, string BaseUrl, string BeneficiaryAccount, bool UseSandbox) GetConfig()

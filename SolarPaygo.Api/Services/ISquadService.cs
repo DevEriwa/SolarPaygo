@@ -21,5 +21,6 @@ namespace SolarPaygo.Api.Services
     {
         public string VirtualAccountNumber { get; set; } = string.Empty;
         public string BankName { get; set; } = "Guaranty Trust Bank (Squad Sandbox)";
+        public string? ErrorMessage { get; set; }
     }
 }
