@@ -15,6 +15,7 @@ export default function Dashboard({ dashboardData, loading, refreshData }) {
   const [regBvn, setRegBvn] = useState('');
   const [regGender, setRegGender] = useState('');
   const [regDob, setRegDob] = useState('');
+  const [regGeneratorCapacity, setRegGeneratorCapacity] = useState('2KV');
   const [regError, setRegError] = useState(null);
   const [regSuccess, setRegSuccess] = useState(false);
   const [regLoading, setRegLoading] = useState(false);
@@ -46,7 +47,8 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
           customerPhone: regPhone.trim(),
           customerBvn: regBvn.trim(),
           customerDob: formattedDob,
-          customerGender: regGender
+          customerGender: regGender,
+          generatorCapacity: regGeneratorCapacity
         })
       });
 
@@ -59,7 +61,8 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
         setRegPhone('');
         setRegBvn('');
         setRegDob('');
-        refreshData(); // Re-fetch shared data in App.jsx
+        setRegGeneratorCapacity('2KV');
+        refreshData();
         setTimeout(() => setIsRegisterOpen(false), 2000);
       } else {
         const txt = await response.text();
@@ -175,7 +178,12 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
           <tbody>
             {filteredSystems.map(sys => {
               const s = sys.status.toLowerCase();
-              const percent = Math.min((sys.availableUnits / 100) * 100, 100).toFixed(0);
+              const totalBought = sys.cumulativeKwhBought || 0;
+              const totalUsed = sys.cumulativeKwhConsumed || 0;
+              const remaining = sys.availableUnits || 0;
+              const generatorCapacityKw = parseFloat((sys.generatorCapacity || '2KV').replace(/[^0-9.]/g, '')) || 2;
+              const maxCapacityKwh = generatorCapacityKw * 100; // display scale
+              const percent = Math.min((remaining / Math.max(totalBought, 1)) * 100, 100).toFixed(0);
               const isDiscounted = sys.cumulativeKwhConsumed >= 500;
               
               return (
@@ -187,6 +195,13 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                     {sys.stronMeterId && (
                       <div style={{ fontSize: '0.8rem', color: 'var(--primary-accent)', marginTop: '4px', fontFamily: 'monospace' }}>
                         Meter: {sys.stronMeterId}
+                      </div>
+                    )}
+                    {sys.generatorCapacity && (
+                      <div style={{ marginTop: '4px' }}>
+                        <span style={{ background: 'rgba(250,200,50,0.12)', color: '#f5c842', padding: '2px 7px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold', fontFamily: 'monospace' }}>
+                          ⚡ {sys.generatorCapacity} Generator
+                        </span>
                       </div>
                     )}
                   </td>
@@ -264,9 +279,12 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                       <div className="progress-track">
                         <div className={`progress-fill ${s}`} style={{ width: `${percent}%` }}></div>
                       </div>
-                      <div className="progress-text">{sys.availableUnits?.toFixed(2) || '0.00'} / 100 kWh</div>
-                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                        Total Used: {sys.cumulativeKwhConsumed?.toFixed(1) || '0.0'} kWh
+                      <div className="progress-text" style={{ color: remaining > 0 ? 'var(--success)' : 'var(--danger)' }}>
+                        {remaining.toFixed(2)} kWh remaining
+                      </div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                        <span>📥 Bought: <strong>{totalBought.toFixed(2)} kWh</strong></span>
+                        <span>📤 Used: <strong>{totalUsed.toFixed(2)} kWh</strong></span>
                       </div>
                     </div>
                   </td>
@@ -360,6 +378,19 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                     <input required type="text" maxLength="12" value={regMeterId} onChange={(e) => setRegMeterId(e.target.value.replace(/\D/g, ''))} placeholder="e.g. 9013151606" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white' }} />
                   </div>
                 </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>⚡ Generator Capacity</label>
+                <select required value={regGeneratorCapacity} onChange={(e) => setRegGeneratorCapacity(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }}>
+                  <option value="1KV">1KV – Small (Residential, 1 room)</option>
+                  <option value="2KV">2KV – Medium (Standard Household)</option>
+                  <option value="3KV">3KV – Large (Small Business / Shop)</option>
+                  <option value="5KV">5KV – Extra Large (Commercial)</option>
+                  <option value="7.5KV">7.5KV – Heavy Duty</option>
+                  <option value="10KV">10KV – Industrial</option>
+                </select>
+                <span style={{ fontSize: '0.7rem', color: 'var(--warning)', marginTop: '4px', display: 'block' }}>⚠️ Load must not exceed 90% of this capacity or the relay will automatically trip off.</span>
               </div>
 
               <div>

@@ -258,6 +258,7 @@ namespace SolarPaygo.Api.Controllers
             public string CustomerDob { get; set; } = "1990-01-01";
             public string CustomerAddress { get; set; } = "Lagos, Nigeria";
             public string CustomerGender { get; set; } = ""; // Gender will be selected by user/admin
+            public string GeneratorCapacity { get; set; } = "2KV"; // e.g. 1KV, 2KV, 3KV, 5KV, 10KV
 
             // Support snake_case/Squad-style names if sent directly
             public string? customer_identifier { get; set; }
@@ -368,9 +369,11 @@ namespace SolarPaygo.Api.Controllers
                 CustomerBvn = request.CustomerBvn,
                 CustomerDob = request.CustomerDob,
                 CustomerGender = request.CustomerGender,
-                Status = "Active",
-                AvailableUnits = 2.0M, // Default free 2 kWh units
-                PrepaidNairaBalance = 5000M, // Seed with default balance
+                GeneratorCapacity = !string.IsNullOrWhiteSpace(request.GeneratorCapacity) ? request.GeneratorCapacity : "2KV",
+                Status = "Locked",
+                AvailableUnits = 0.0M,
+                PrepaidNairaBalance = 0.0M,
+                CumulativeKwhBought = 0.0M,
                 CumulativeKwhConsumed = 0m,
                 LastSyncTime = DateTime.UtcNow,
                 LastSyncKwh = 0m

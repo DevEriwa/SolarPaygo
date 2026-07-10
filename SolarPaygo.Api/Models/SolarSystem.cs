@@ -39,5 +39,9 @@ namespace SolarPaygo.Api.Models
         public decimal Power { get; set; } // W
         public string RelayState { get; set; } = "1"; // "1" = closed/on, "0" = open/off
         public string CoverState { get; set; } = "0"; // "0" = normal, "1" = tampered
+
+        // New properties for unit history and generator capacity tracking
+        public decimal CumulativeKwhBought { get; set; } = 0.0M;
+        public string GeneratorCapacity { get; set; } = "2KV";
     }
 }
