@@ -52,25 +52,60 @@ namespace SolarPaygo.Api.Services
 
                 if (response.IsSuccessStatusCode)
                 {
-                    var results = await response.Content.ReadFromJsonAsync<List<CreditInformationViewModel>>();
-                    if (results != null && results.Count > 0)
-                    {
-                        var res = results[0];
-                        _logger.LogInformation("[Stron] Successfully generated token: {Token} ({Unit} kWh)", res.Token, res.Unit);
+                    var raw = await response.Content.ReadAsStringAsync();
+                    _logger.LogInformation("[Stron] Raw response: {Raw}", raw);
+                    
+                    using var doc = JsonDocument.Parse(raw);
+                    JsonElement root = doc.RootElement;
+                    JsonElement targetElement = root;
 
-                        decimal.TryParse(res.Unit, out var unitDecimal);
-                        decimal.TryParse(res.Price, out var priceDecimal);
+                    if (root.ValueKind == JsonValueKind.Array)
+                    {
+                        if (root.GetArrayLength() > 0)
+                        {
+                            targetElement = root[0];
+                        }
+                        else
+                        {
+                            _logger.LogWarning("[Stron] Empty array returned.");
+                            return null;
+                        }
+                    }
+
+                    string token = "";
+                    if (targetElement.TryGetProperty("Token", out var tokenProp))
+                        token = tokenProp.GetString() ?? "";
+                    else if (targetElement.TryGetProperty("token", out var tokenProp2))
+                        token = tokenProp2.GetString() ?? "";
+
+                    string unit = "";
+                    if (targetElement.TryGetProperty("Total_unit", out var unitProp))
+                        unit = unitProp.GetString() ?? "";
+                    else if (targetElement.TryGetProperty("total_unit", out var unitProp2))
+                        unit = unitProp2.GetString() ?? "";
+                    else if (targetElement.TryGetProperty("Unit", out var unitProp3))
+                        unit = unitProp3.GetString() ?? "";
+
+                    string price = "";
+                    if (targetElement.TryGetProperty("Price", out var priceProp))
+                        price = priceProp.GetString() ?? "";
+                    else if (targetElement.TryGetProperty("price", out var priceProp2))
+                        price = priceProp2.GetString() ?? "";
+
+                    if (!string.IsNullOrEmpty(token))
+                    {
+                        _logger.LogInformation("[Stron] Successfully parsed token: {Token} ({Unit} units)", token, unit);
+                        decimal.TryParse(unit, out var unitDecimal);
+                        decimal.TryParse(price, out var priceDecimal);
 
                         return new StronVendingResponse
                         {
-                            Token = FormatToken(res.Token),
+                            Token = FormatToken(token),
                             Units = unitDecimal,
                             Price = priceDecimal
                         };
                     }
-
-                    var emptyErr = await response.Content.ReadAsStringAsync();
-                    _logger.LogWarning("[Stron] Vending returned success status but empty result list. Raw: {Raw}", emptyErr);
+                    _logger.LogWarning("[Stron] Vending returned success status but token was missing or empty.");
                 }
                 else
                 {
