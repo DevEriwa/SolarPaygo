@@ -97,6 +97,13 @@ namespace SolarPaygo.Api.Controllers
             sys.Power = status.Power;
             sys.CoverState = status.CoverState;
 
+            // Ensure MaxLoadWatts aligns with declared GeneratorCapacity (e.g., 2KV => 2000W)
+            if (!string.IsNullOrWhiteSpace(sys.GeneratorCapacity))
+            {
+                int capacityKw = ParseCapacityKw(sys.GeneratorCapacity);
+                sys.MaxLoadWatts = capacityKw * 1000;
+            }
+
             // 2. Enforce Maximum Load Limit
             if (sys.Power > sys.MaxLoadWatts && sys.Status != "Locked")
             {
@@ -370,6 +377,8 @@ namespace SolarPaygo.Api.Controllers
                 CustomerDob = request.CustomerDob,
                 CustomerGender = request.CustomerGender,
                 GeneratorCapacity = !string.IsNullOrWhiteSpace(request.GeneratorCapacity) ? request.GeneratorCapacity : "2KV",
+                // Derive MaxLoadWatts from GeneratorCapacity (KV -> Watts)
+                MaxLoadWatts = (int)(ParseCapacityKw(request.GeneratorCapacity) * 1000),
                 Status = "Locked",
                 AvailableUnits = 0.0M,
                 PrepaidNairaBalance = 0.0M,
@@ -428,6 +437,17 @@ namespace SolarPaygo.Api.Controllers
             if (string.IsNullOrWhiteSpace(fullName)) return "Customer";
             var parts = fullName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             return parts.Length > 0 ? parts[0] : "Customer";
+        }
+
+        // Helper to parse numeric kW from a string like "2KV".
+        private static int ParseCapacityKw(string capacity)
+        {
+            if (string.IsNullOrWhiteSpace(capacity))
+                return 2; // Default fallback
+            var numeric = new string(capacity.Where(char.IsDigit).ToArray());
+            if (int.TryParse(numeric, out var kw))
+                return kw;
+            return 2;
         }
 
         private string GetLastName(string fullName)
