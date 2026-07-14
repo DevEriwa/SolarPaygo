@@ -43,11 +43,15 @@ namespace SolarPaygo.Api.Controllers
         public async Task<IActionResult> GetDashboardSummary()
         {
             var systems = await _context.SolarSystems.ToListAsync();
-            
+
+            // Track which meters successfully responded (online) during this sync cycle
+            var meterOnlineMap = new Dictionary<int, bool>();
+
             // Sync each system sequentially because DbContext is not thread-safe for parallel operations
             foreach (var sys in systems)
             {
-                await SyncSystemAndApplyBilling(sys);
+                bool online = await SyncSystemAndApplyBilling(sys);
+                meterOnlineMap[sys.Id] = online;
             }
             
             await _context.SaveChangesAsync();
@@ -75,21 +79,35 @@ namespace SolarPaygo.Api.Controllers
                 })
                 .ToListAsync();
 
+            // Build enriched system list with real-time meter connectivity flag
+            var enrichedSystems = systems.Select(s => new {
+                s.Id, s.HardwareId, s.Status, s.AvailableUnits, s.OwnerName, s.StronMeterId,
+                s.VirtualAccountNumber, s.VirtualBankName, s.CustomerEmail, s.CustomerPhone,
+                s.CustomerBvn, s.CustomerDob, s.CustomerGender,
+                s.PrepaidNairaBalance, s.CumulativeKwhConsumed, s.CumulativeKwhBought,
+                s.LastSyncTime, s.LastSyncKwh, s.MaxLoadWatts,
+                s.DailyKwhConsumed, s.DailyTimeActiveHours, s.DailyAmountCharged,
+                s.Voltage, s.Current, s.Power, s.RelayState, s.CoverState,
+                s.GeneratorCapacity,
+                MeterOnline = meterOnlineMap.TryGetValue(s.Id, out bool online) && online
+            }).ToList();
+
             return Ok(new {
-                Systems = systems,
+                Systems = enrichedSystems,
                 RevenueToday = revenueToday,
                 RecentPayments = recentPayments
             });
         }
 
         // Helper: Syncs live Stron telemetry, applies overload cutoff, and calculates daily hybrid billing
-        private async Task SyncSystemAndApplyBilling(SolarSystem sys)
+        // Returns true if the meter responded (online), false if offline/unreachable
+        private async Task<bool> SyncSystemAndApplyBilling(SolarSystem sys)
         {
-            if (string.IsNullOrWhiteSpace(sys.StronMeterId)) return;
+            if (string.IsNullOrWhiteSpace(sys.StronMeterId)) return false;
 
             // 1. Call Stron live API to get the current meter status
             var status = await _vendingService.QueryMeterStatusAsync(sys.StronMeterId, DateTime.UtcNow);
-            if (status == null) return;
+            if (status == null) return false; // Meter offline — skip sync, return offline
 
             // Update live telemetry data
             sys.Voltage = status.Voltage;
@@ -111,7 +129,7 @@ namespace SolarPaygo.Api.Controllers
                 sys.Status = "Locked";
                 sys.RelayState = "0";
                 await _vendingService.SetRemoteSwitchAsync(sys.StronMeterId, turnOn: false);
-                return; // Stop billing/processing for this cycle since we just cut it off
+                return true; // Meter was reachable — relay cut due to overload
             }
 
             // 3. Perform Billing calculations if it has been synced before
@@ -193,6 +211,8 @@ namespace SolarPaygo.Api.Controllers
                 sys.LastSyncKwh = status.CumulativeConsumption;
                 sys.LastBillingDate = now.Date;
             }
+
+            return true; // Meter was reachable
         }
 
         [Authorize(Roles = "Admin")]
@@ -379,9 +399,9 @@ namespace SolarPaygo.Api.Controllers
                 GeneratorCapacity = !string.IsNullOrWhiteSpace(request.GeneratorCapacity) ? request.GeneratorCapacity : "2KV",
                 // Derive MaxLoadWatts from GeneratorCapacity (KV -> Watts)
                 MaxLoadWatts = (int)(ParseCapacityKw(request.GeneratorCapacity) * 1000),
-                Status = "Locked",
-                AvailableUnits = 0.0M,
-                PrepaidNairaBalance = 0.0M,
+                Status = "Locked", // New systems always start locked until customer makes first payment
+                AvailableUnits = 0.0M,      // ₦0 balance — no free credit
+                PrepaidNairaBalance = 0.0M, // ₦0 balance — no free credit
                 CumulativeKwhBought = 0.0M,
                 CumulativeKwhConsumed = 0m,
                 LastSyncTime = DateTime.UtcNow,
@@ -429,6 +449,49 @@ namespace SolarPaygo.Api.Controllers
 
             await _context.SaveChangesAsync();
             return Ok(system);
+        }
+
+        // Dedicated relay control — locks/opens relay without changing account status
+        [Authorize(Roles = "Admin")]
+        [HttpPost("systems/{id}/relay-off")]
+        public async Task<IActionResult> RelayOff(int id)
+        {
+            var system = await _context.SolarSystems.FindAsync(id);
+            if (system == null) return NotFound();
+
+            system.RelayState = "0";
+            if (!string.IsNullOrWhiteSpace(system.StronMeterId))
+            {
+                bool success = await _vendingService.SetRemoteSwitchAsync(system.StronMeterId, turnOn: false);
+                if (!success)
+                    return BadRequest(new { message = "Relay command sent but meter did not confirm. Check meter connectivity." });
+            }
+
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Relay opened (cut). Power supply is OFF.", system });
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpPost("systems/{id}/relay-on")]
+        public async Task<IActionResult> RelayOn(int id)
+        {
+            var system = await _context.SolarSystems.FindAsync(id);
+            if (system == null) return NotFound();
+
+            // Only restore relay if system has credit
+            if (system.AvailableUnits <= 0 || system.PrepaidNairaBalance <= 0)
+                return BadRequest(new { message = "Cannot restore relay: Account has no available units or balance. Customer must top up first." });
+
+            system.RelayState = "1";
+            if (!string.IsNullOrWhiteSpace(system.StronMeterId))
+            {
+                bool success = await _vendingService.SetRemoteSwitchAsync(system.StronMeterId, turnOn: true);
+                if (!success)
+                    return BadRequest(new { message = "Relay command sent but meter did not confirm. Check meter connectivity." });
+            }
+
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Relay closed. Power supply is ON.", system });
         }
 
         // Helper Split Name Methods for Squad Model

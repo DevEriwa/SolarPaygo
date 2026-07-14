@@ -19,6 +19,8 @@ export default function Dashboard({ dashboardData, loading, refreshData }) {
   const [regError, setRegError] = useState(null);
   const [regSuccess, setRegSuccess] = useState(false);
   const [regLoading, setRegLoading] = useState(false);
+  const [relayError, setRelayError] = useState(null);
+  const [relayLoading, setRelayLoading] = useState(null); // id of system being toggled
 
   // Derive summary from passed-in data
   const summary = dashboardData || { systems: [], revenueToday: 0, recentPayments: [] };
@@ -76,6 +78,8 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
   };
 
   const handleToggleState = async (id, action) => {
+    setRelayError(null);
+    setRelayLoading(id);
     try {
       const token = localStorage.getItem('token');
       const response = await fetch(`${BASE_URL}/dashboard/systems/${id}/${action}`, {
@@ -84,9 +88,20 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
       });
       if (response.ok) {
         refreshData(); // Re-fetch shared data in App.jsx
+      } else {
+        // Try to read a meaningful error from the backend
+        try {
+          const errData = await response.json();
+          setRelayError(errData.message || `Action "${action}" failed (${response.status})`);
+        } catch {
+          setRelayError(`Action "${action}" failed (${response.status})`);
+        }
       }
     } catch (err) {
+      setRelayError(`Network error: could not reach API for system ${id}`);
       console.error(`Failed to ${action} system ${id}`);
+    } finally {
+      setRelayLoading(null);
     }
   };
 
@@ -94,6 +109,11 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
   const activeSystems = systems.filter(s => s.status === 'Active' || s.status === 'active');
   const lockedSystems = systems.filter(s => s.status === 'Locked' || s.status === 'locked');
   const filteredSystems = filter === 'All' ? systems : systems.filter(s => s.status === filter);
+
+  // Derive overall sync health: green if ALL meters with a Stron ID reported online, orange/red otherwise
+  const metersWithId = systems.filter(s => s.stronMeterId || s.StronMeterId);
+  const onlineCount = metersWithId.filter(s => s.meterOnline || s.MeterOnline).length;
+  const syncStatus = metersWithId.length === 0 ? 'none' : onlineCount === metersWithId.length ? 'online' : onlineCount === 0 ? 'offline' : 'partial';
 
   // Formatting helpers
   const formatNaira = (amount) => new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', minimumFractionDigits: 0 }).format(amount);
@@ -118,9 +138,13 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
           <button onClick={() => { setRegSuccess(false); setRegError(null); setIsRegisterOpen(true); }} className="action-btn" style={{ background: 'var(--primary-accent)', color: 'var(--bg-dark)', borderColor: 'var(--primary-accent)', flexDirection: 'row', gap: '8px', padding: '8px 16px' }}>
             <Plus size={18} /> Register Generator
           </button>
-          <div className="live-badge">
-            <div className="live-dot"></div>
-            Live Smart Sync
+          <div className="live-badge" style={{
+            background: syncStatus === 'online' ? 'rgba(16,185,129,0.15)' : syncStatus === 'offline' ? 'rgba(239,68,68,0.15)' : 'rgba(245,158,11,0.15)',
+            border: `1px solid ${syncStatus === 'online' ? 'rgba(16,185,129,0.4)' : syncStatus === 'offline' ? 'rgba(239,68,68,0.4)' : 'rgba(245,158,11,0.4)'}`,
+            color: syncStatus === 'online' ? 'var(--success)' : syncStatus === 'offline' ? 'var(--danger)' : 'var(--warning)'
+          }}>
+            <div className="live-dot" style={{ background: syncStatus === 'online' ? 'var(--success)' : syncStatus === 'offline' ? 'var(--danger)' : 'var(--warning)' }}></div>
+            {syncStatus === 'online' ? 'Meter Online' : syncStatus === 'offline' ? 'Meter Offline' : syncStatus === 'partial' ? 'Partial Sync' : 'No Meter ID'}
           </div>
         </div>
       </div>
@@ -162,6 +186,13 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
           </div>
         </div>
 
+        {relayError && (
+          <div style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)', color: 'var(--danger)', borderRadius: '8px', padding: '10px 16px', margin: '0 0 12px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.88rem' }}>
+            <span>⚠️ {relayError}</span>
+            <button onClick={() => setRelayError(null)} style={{ background: 'transparent', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: '1.1rem', lineHeight: 1 }}>×</button>
+          </div>
+        )}
+
         <table className="data-table">
           <thead>
             <tr>
@@ -169,8 +200,6 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
               <th>Squad Virtual Account</th>
               <th>Naira Balance</th>
               <th>Meter Live Telemetry</th>
-              <th>DOB</th>
-              <th>Gender</th>
               <th>Energy Remaining</th>
               <th>Actions</th>
             </tr>
@@ -267,11 +296,6 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                     )}
                   </td>
 
-                  {/* DOB */}
-                  <td>{sys.customerDob ? new Date(sys.customerDob).toLocaleDateString() : 'N/A'}</td>
-                  
-                  {/* Gender */}
-                  <td>{sys.customerGender === "1" ? "Male" : sys.customerGender === "2" ? "Female" : "Other"}</td>
                   
                   {/* Energy units Remaining */}
                   <td>
@@ -292,12 +316,16 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                   {/* Row actions */}
                   <td>
                     <div className="action-buttons">
-                      {sys.status === "Locked" ? (
-                        <button onClick={() => handleToggleState(sys.id, 'enable')} className="action-btn unlock" style={{ padding: '6px 12px' }}>
-                          <Unlock size={14} /> Unlock
+                      {relayLoading === sys.id ? (
+                        <button className="action-btn" style={{ padding: '6px 12px', opacity: 0.6 }} disabled>
+                          ⏳ Sending...
+                        </button>
+                      ) : sys.relayState === '0' || sys.RelayState === '0' ? (
+                        <button onClick={() => handleToggleState(sys.id, 'relay-on')} className="action-btn unlock" style={{ padding: '6px 12px' }}>
+                          <Unlock size={14} /> Close Relay
                         </button>
                       ) : (
-                        <button onClick={() => handleToggleState(sys.id, 'disable')} className="action-btn disable" style={{ padding: '6px 12px' }}>
+                        <button onClick={() => handleToggleState(sys.id, 'relay-off')} className="action-btn disable" style={{ padding: '6px 12px' }}>
                           <MinusCircle size={14} /> Lock Relay
                         </button>
                       )}
@@ -307,7 +335,7 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
               );
             })}
             {filteredSystems.length === 0 && !loading && (
-              <tr><td colSpan="8" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px' }}>No systems match filter.</td></tr>
+              <tr><td colSpan="6" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px' }}>No systems match filter.</td></tr>
             )}
           </tbody>
         </table>
