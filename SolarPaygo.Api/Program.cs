@@ -70,6 +70,10 @@ builder.Services.AddCors(options =>
             "https://www.idiascosolarsystem.co.uk",
             "https://app.idiascosolarsystem.co.uk",
             "http://app.idiascosolarsystem.co.uk",
+             "http://appuat.idiascosolarsystem.co.uk",
+              "https://appuat.idiascosolarsystem.co.uk",
+               "http://uat.idiascosolarsystem.co.uk",
+                "https://uat.idiascosolarsystem.co.uk",
         };
 
         if (builder.Environment.IsDevelopment())
