@@ -283,6 +283,7 @@ namespace SolarPaygo.Api.Controllers
             // Update system units and Naira cash balance
             system.AvailableUnits += actualUnitsVended;
             system.PrepaidNairaBalance += amountPaid;
+            system.CumulativeKwhBought += actualUnitsVended; // Track total units ever purchased
 
             // Remotely Unlock system relay if it was Locked and now has balance/units
             if (system.Status == "Locked" && system.AvailableUnits > 0)

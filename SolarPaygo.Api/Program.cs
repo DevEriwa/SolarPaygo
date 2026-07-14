@@ -142,6 +142,26 @@ using (var scope = app.Services.CreateScope())
     }
     // Ensure schema exists (creates tables if missing)
     db.Database.EnsureCreated();
+
+    // Auto-migrate schema updates safely
+    try
+    {
+        db.Database.ExecuteSqlRaw(@"
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('SolarSystems') AND name = 'CumulativeKwhBought')
+            BEGIN
+                ALTER TABLE SolarSystems ADD CumulativeKwhBought DECIMAL(18, 2) NOT NULL DEFAULT 0.0;
+            END
+            
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('SolarSystems') AND name = 'GeneratorCapacity')
+            BEGIN
+                ALTER TABLE SolarSystems ADD GeneratorCapacity NVARCHAR(50) NOT NULL DEFAULT '2KV';
+            END
+        ");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine("[DB Update] Error applying DB column updates: " + ex.Message);
+    }
 }
 
 // Enable Swagger UI in Development for debugging
