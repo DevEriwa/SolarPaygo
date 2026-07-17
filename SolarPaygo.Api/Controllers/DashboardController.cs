@@ -37,24 +37,12 @@ namespace SolarPaygo.Api.Controllers
             _configuration = configuration;
         }
 
-        // 1. Fetch Systems (and sync live metrics + apply hybrid billing in the process)
+        // 1. Fetch Systems (fast DB query)
         [Authorize(Roles = "Admin")]
         [HttpGet("systems")]
         public async Task<IActionResult> GetDashboardSummary()
         {
             var systems = await _context.SolarSystems.ToListAsync();
-
-            // Track which meters successfully responded (online) during this sync cycle
-            var meterOnlineMap = new Dictionary<int, bool>();
-
-            // Sync each system sequentially because DbContext is not thread-safe for parallel operations
-            foreach (var sys in systems)
-            {
-                bool online = await SyncSystemAndApplyBilling(sys);
-                meterOnlineMap[sys.Id] = online;
-            }
-            
-            await _context.SaveChangesAsync();
 
             // Calculate today's revenue
             var today = DateTime.UtcNow.Date;
@@ -79,7 +67,8 @@ namespace SolarPaygo.Api.Controllers
                 })
                 .ToListAsync();
 
-            // Build enriched system list with real-time meter connectivity flag
+            // Build enriched system list with cached meter connectivity flag
+            // A meter is considered "Online" if its last sync time was within the last 15 minutes
             var enrichedSystems = systems.Select(s => new {
                 s.Id, s.HardwareId, s.Status, s.AvailableUnits, s.OwnerName, s.StronMeterId,
                 s.VirtualAccountNumber, s.VirtualBankName, s.CustomerEmail, s.CustomerPhone,
@@ -89,7 +78,7 @@ namespace SolarPaygo.Api.Controllers
                 s.DailyKwhConsumed, s.DailyTimeActiveHours, s.DailyAmountCharged,
                 s.Voltage, s.Current, s.Power, s.RelayState, s.CoverState,
                 s.GeneratorCapacity,
-                MeterOnline = meterOnlineMap.TryGetValue(s.Id, out bool online) && online
+                MeterOnline = s.LastSyncTime.HasValue && (DateTime.UtcNow - s.LastSyncTime.Value).TotalMinutes < 15
             }).ToList();
 
             return Ok(new {

@@ -56,6 +56,7 @@ builder.Services.AddScoped<ISquadService, SquadService>();
 builder.Services.AddScoped<IStronVendingService, StronVendingService>();
 builder.Services.AddScoped<ISmsService, LoggingSmsService>();
 builder.Services.AddHostedService<DailyBillingResetService>();
+builder.Services.AddHostedService<TelemetrySyncService>();
 
 builder.Services.AddSignalR();
 
