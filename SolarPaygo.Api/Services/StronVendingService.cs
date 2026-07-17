@@ -140,48 +140,89 @@ namespace SolarPaygo.Api.Services
                     CompanyName = config.Company,
                     UserName = config.User,
                     PassWord = config.Pass,
-                    MeterId = meterId,
-                    Date = date.ToString("yyyy-MM-dd")
+                    MeterId = meterId
                 };
 
-                var response = await _httpClient.PostAsJsonAsync($"{config.BaseUrl.TrimEnd('/')}/api/QueryDailySinglePhaseMeter", payload);
+                var response = await _httpClient.PostAsJsonAsync($"{config.BaseUrl.TrimEnd('/')}/api/RemotelyRead", payload);
                 var rawResult = await response.Content.ReadAsStringAsync();
 
                 if (response.IsSuccessStatusCode)
                 {
-                    try
+                    var lines = JsonSerializer.Deserialize<List<string>>(rawResult, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    if (lines != null && lines.Count > 0)
                     {
-                        var results = JsonSerializer.Deserialize<List<SinglePhaseDaliyInformationViewModel>>(rawResult, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                        if (results != null && results.Count > 0)
-                        {
-                            var res = results[0];
-                            decimal.TryParse(res.Residual_Amount, out var residual);
-                            decimal.TryParse(res.Cumulative_Total_Consumption, out var cumulative);
-                            decimal.TryParse(res.Voltage, out var voltage);
-                            decimal.TryParse(res.Current, out var current);
-                            decimal.TryParse(res.Power, out var power);
+                        bool isSuccess = false;
+                        decimal voltage = 0;
+                        decimal current = 0;
+                        decimal power = 0;
+                        decimal residual = 0;
+                        decimal cumulative = 0;
+                        string relayState = "1";
+                        string coverState = "0";
 
+                        foreach (var line in lines)
+                        {
+                            if (string.IsNullOrWhiteSpace(line)) continue;
+                            var parts = line.Split(':', 2);
+                            if (parts.Length < 2) continue;
+
+                            string key = parts[0].Trim().ToLower();
+                            string val = parts[1].Trim();
+
+                            if (key == "readdata")
+                            {
+                                isSuccess = val.ToLower().Contains("successfully");
+                            }
+                            else if (key == "voltage")
+                            {
+                                voltage = ParseDecimalValue(val);
+                            }
+                            else if (key == "current")
+                            {
+                                current = ParseDecimalValue(val);
+                            }
+                            else if (key == "power")
+                            {
+                                // Power is returned in kW, convert to Watts (kW * 1000)
+                                power = ParseDecimalValue(val) * 1000m;
+                            }
+                            else if (key == "residual_amount")
+                            {
+                                residual = ParseDecimalValue(val);
+                            }
+                            else if (key == "cumulative_total_kwh_consumption" || key == "cumulative_total_kwh_consumption ")
+                            {
+                                cumulative = ParseDecimalValue(val);
+                            }
+                            else if (key == "relay_state")
+                            {
+                                relayState = val.ToLower().Contains("off") ? "0" : "1";
+                            }
+                            else if (key == "cover_state")
+                            {
+                                coverState = val.ToLower().Contains("normal") ? "0" : "1";
+                            }
+                        }
+
+                        if (isSuccess)
+                        {
                             return new StronMeterStatusResponse
                             {
-                                MeterId = res.MeterID,
+                                MeterId = meterId,
                                 ResidualAmount = residual,
                                 CumulativeConsumption = cumulative,
                                 Voltage = voltage,
                                 Current = current,
                                 Power = power,
-                                RelayState = res.RelayState,
-                                CoverState = res.CoverState
+                                RelayState = relayState,
+                                CoverState = coverState
                             };
                         }
-                    }
-                    catch (Exception jsonEx)
-                    {
-                        _logger.LogWarning("[Stron] Failed to parse meter status JSON. Raw: {Raw}. Error: {Error}", rawResult, jsonEx.Message);
                     }
                 }
                 else
                 {
-                    _logger.LogWarning("[Stron] Meter status query failed: Status={Status}, Raw: {Raw}", response.StatusCode, rawResult);
+                    _logger.LogWarning("[Stron] RemotelyRead query failed: Status={Status}, Raw: {Raw}", response.StatusCode, rawResult);
                 }
             }
             catch (HttpRequestException ex)
@@ -243,6 +284,116 @@ namespace SolarPaygo.Api.Services
 
             // Return false — the caller knows the hardware command did not execute.
             return false;
+        }
+
+        public async Task<string?> GenerateClearTamperTokenAsync(string meterId)
+        {
+            var config = GetConfig();
+            try
+            {
+                var payload = new
+                {
+                    CompanyName = config.Company,
+                    UserName = config.User,
+                    PassWord = config.Pass,
+                    METER_ID = meterId
+                };
+
+                var response = await _httpClient.PostAsJsonAsync($"{config.BaseUrl.TrimEnd('/')}/api/ClearTamperDirectly", payload);
+                if (response.IsSuccessStatusCode)
+                {
+                    var resultStr = await response.Content.ReadAsStringAsync();
+                    if (!string.IsNullOrWhiteSpace(resultStr))
+                    {
+                        string clean = resultStr.Trim('"', ' ');
+                        var parts = clean.Split(',');
+                        if (parts.Length > 0)
+                        {
+                            return FormatToken(parts[0]);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Stron] Error generating clear tamper token for meter {MeterId}.", meterId);
+            }
+            return null;
+        }
+
+        public async Task<string?> GenerateClearCreditTokenAsync(string meterId)
+        {
+            var config = GetConfig();
+            try
+            {
+                var payload = new
+                {
+                    CompanyName = config.Company,
+                    UserName = config.User,
+                    PassWord = config.Pass,
+                    METER_ID = meterId
+                };
+
+                var response = await _httpClient.PostAsJsonAsync($"{config.BaseUrl.TrimEnd('/')}/api/ClearCreditDirectly", payload);
+                if (response.IsSuccessStatusCode)
+                {
+                    var resultStr = await response.Content.ReadAsStringAsync();
+                    if (!string.IsNullOrWhiteSpace(resultStr))
+                    {
+                        string clean = resultStr.Trim('"', ' ');
+                        var parts = clean.Split(',');
+                        if (parts.Length > 0)
+                        {
+                            return FormatToken(parts[0]);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Stron] Error generating clear credit token for meter {MeterId}.", meterId);
+            }
+            return null;
+        }
+
+        public async Task<bool> SendTokenRemotelyAsync(string meterId, string token)
+        {
+            var config = GetConfig();
+            try
+            {
+                var payload = new
+                {
+                    CompanyName = config.Company,
+                    UserName = config.User,
+                    PassWord = config.Pass,
+                    MeterID = meterId,
+                    Token = token.Replace("-", "").Replace(" ", "")
+                };
+
+                var response = await _httpClient.PostAsJsonAsync($"{config.BaseUrl.TrimEnd('/')}/api/VendingMeterSendToken", payload);
+                if (response.IsSuccessStatusCode)
+                {
+                    var result = await response.Content.ReadAsStringAsync();
+                    _logger.LogInformation("[Stron] Send token remotely response: {Result}", result);
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Stron] Error sending token remotely to meter {MeterId}.", meterId);
+            }
+            return false;
+        }
+
+        private decimal ParseDecimalValue(string valueStr)
+        {
+            if (string.IsNullOrWhiteSpace(valueStr)) return 0;
+            var parts = valueStr.Trim().Split(' ');
+            if (parts.Length > 0 && decimal.TryParse(parts[0], out var val))
+            {
+                return val;
+            }
+            return 0;
         }
 
         private string FormatToken(string token)

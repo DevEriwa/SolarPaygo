@@ -494,6 +494,79 @@ namespace SolarPaygo.Api.Controllers
             return Ok(new { message = "Relay closed. Power supply is ON.", system });
         }
 
+        [Authorize(Roles = "Admin")]
+        [HttpPost("systems/{id}/clear-tamper")]
+        public async Task<IActionResult> ClearTamper(int id)
+        {
+            var system = await _context.SolarSystems.FindAsync(id);
+            if (system == null) return NotFound();
+
+            if (string.IsNullOrWhiteSpace(system.StronMeterId))
+                return BadRequest(new { message = "No Stron meter linked to this system." });
+
+            string? token = await _vendingService.GenerateClearTamperTokenAsync(system.StronMeterId);
+            if (string.IsNullOrWhiteSpace(token))
+                return BadRequest(new { message = "Failed to generate Clear Tamper token from Stron server." });
+
+            bool sent = await _vendingService.SendTokenRemotelyAsync(system.StronMeterId, token);
+
+            return Ok(new { 
+                message = sent ? "Clear Tamper token sent to meter successfully." : "Clear Tamper token generated, but remote transmission failed. Please enter the token code manually on the keypad.",
+                token = token,
+                sentRemotely = sent
+            });
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpPost("systems/{id}/clear-credit")]
+        public async Task<IActionResult> ClearCredit(int id)
+        {
+            var system = await _context.SolarSystems.FindAsync(id);
+            if (system == null) return NotFound();
+
+            if (string.IsNullOrWhiteSpace(system.StronMeterId))
+                return BadRequest(new { message = "No Stron meter linked to this system." });
+
+            string? token = await _vendingService.GenerateClearCreditTokenAsync(system.StronMeterId);
+            if (string.IsNullOrWhiteSpace(token))
+                return BadRequest(new { message = "Failed to generate Clear Credit token from Stron server." });
+
+            bool sent = await _vendingService.SendTokenRemotelyAsync(system.StronMeterId, token);
+
+            // Resets units in database too
+            system.AvailableUnits = 0;
+            system.PrepaidNairaBalance = 0;
+            system.Status = "Locked";
+            system.RelayState = "0";
+            await _context.SaveChangesAsync();
+
+            return Ok(new { 
+                message = sent ? "Clear Credit token sent to meter successfully. Credit reset." : "Clear Credit token generated, but remote transmission failed. Please enter the token code manually on the keypad to reset credit.",
+                token = token,
+                sentRemotely = sent
+            });
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpPost("systems/{id}/send-token")]
+        public async Task<IActionResult> SendToken(int id, [FromBody] SendTokenRequest request)
+        {
+            var system = await _context.SolarSystems.FindAsync(id);
+            if (system == null) return NotFound();
+
+            if (string.IsNullOrWhiteSpace(system.StronMeterId))
+                return BadRequest(new { message = "No Stron meter linked to this system." });
+
+            if (string.IsNullOrWhiteSpace(request.Token))
+                return BadRequest(new { message = "Token value is required." });
+
+            bool sent = await _vendingService.SendTokenRemotelyAsync(system.StronMeterId, request.Token);
+            if (!sent)
+                return BadRequest(new { message = "Failed to send token remotely to the meter. Check meter connectivity." });
+
+            return Ok(new { message = "Token successfully transmitted to the meter." });
+        }
+
         // Helper Split Name Methods for Squad Model
         private string GetFirstName(string fullName)
         {
@@ -519,5 +592,10 @@ namespace SolarPaygo.Api.Controllers
             var parts = fullName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             return parts.Length > 1 ? parts[parts.Length - 1] : "User";
         }
+    }
+
+    public class SendTokenRequest
+    {
+        public string Token { get; set; } = string.Empty;
     }
 }

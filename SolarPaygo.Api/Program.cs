@@ -55,7 +55,7 @@ builder.Services.AddScoped<IEmailService, SmtpEmailService>();
 builder.Services.AddScoped<ISquadService, SquadService>();
 builder.Services.AddScoped<IStronVendingService, StronVendingService>();
 builder.Services.AddScoped<ISmsService, LoggingSmsService>();
-// builder.Services.AddHostedService<LowBalanceMonitorService>();
+builder.Services.AddHostedService<DailyBillingResetService>();
 
 builder.Services.AddSignalR();
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Lock, Unlock, MinusCircle, CreditCard, Plus, Activity, User, ShieldAlert, BadgeCheck, Phone, Mail, FileText } from 'lucide-react';
 import { BASE_URL } from '../config';
 
@@ -102,6 +102,47 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
       console.error(`Failed to ${action} system ${id}`);
     } finally {
       setRelayLoading(null);
+    }
+  };
+
+  const [expandedSystemId, setExpandedSystemId] = useState(null);
+  const [stronTokenResult, setStronTokenResult] = useState(null);
+  const [manualToken, setManualToken] = useState('');
+  const [adminActionLoading, setAdminActionLoading] = useState(false);
+
+  const handleAdminAction = async (id, action, body = null) => {
+    setRelayError(null);
+    setStronTokenResult(null);
+    setAdminActionLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const config = {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      };
+      if (body) {
+        config.body = JSON.stringify(body);
+      }
+      
+      const response = await fetch(`${BASE_URL}/dashboard/systems/${id}/${action}`, config);
+      const data = await response.json();
+      
+      if (response.ok) {
+        setStronTokenResult({
+          token: data.token || null,
+          message: data.message || "Action completed successfully."
+        });
+        refreshData();
+      } else {
+        setRelayError(data.message || `Action failed with status ${response.status}`);
+      }
+    } catch (err) {
+      setRelayError("Network connection error. Check if backend API is reachable.");
+    } finally {
+      setAdminActionLoading(false);
     }
   };
 
@@ -214,124 +255,240 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
               const maxCapacityKwh = generatorCapacityKw * 100; // display scale
               const percent = Math.min((remaining / Math.max(totalBought, 1)) * 100, 100).toFixed(0);
               const isDiscounted = sys.cumulativeKwhConsumed >= 500;
-              
-              return (
-                <tr key={sys.id}>
-                  {/* Device Info */}
-                  <td>
-                    <div className="device-name">{sys.ownerName || 'Unknown Unit'}</div>
-                    <div className="device-id">{sys.hardwareId}</div>
-                    {sys.stronMeterId && (
-                      <div style={{ fontSize: '0.8rem', color: 'var(--primary-accent)', marginTop: '4px', fontFamily: 'monospace' }}>
-                        Meter: {sys.stronMeterId}
+                         return (
+                <React.Fragment key={sys.id}>
+                  <tr 
+                    onClick={() => { 
+                      setExpandedSystemId(expandedSystemId === sys.id ? null : sys.id); 
+                      setStronTokenResult(null); 
+                    }} 
+                    style={{ cursor: 'pointer', background: expandedSystemId === sys.id ? 'rgba(255,255,255,0.02)' : '' }}
+                  >
+                    {/* Device Info */}
+                    <td>
+                      <div className="device-name">{sys.ownerName || 'Unknown Unit'}</div>
+                      <div className="device-id">{sys.hardwareId}</div>
+                      {sys.stronMeterId && (
+                        <div style={{ fontSize: '0.8rem', color: 'var(--primary-accent)', marginTop: '4px', fontFamily: 'monospace' }}>
+                          Meter: {sys.stronMeterId}
+                        </div>
+                      )}
+                      {sys.generatorCapacity && (
+                        <div style={{ marginTop: '4px' }}>
+                          <span style={{ background: 'rgba(250,200,50,0.12)', color: '#f5c842', padding: '2px 7px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold', fontFamily: 'monospace' }}>
+                            ⚡ {sys.generatorCapacity} Generator
+                          </span>
+                        </div>
+                      )}
+                    </td>
+                    
+                    {/* Virtual Account details */}
+                    <td>
+                      {sys.virtualAccountNumber ? (
+                        <div>
+                          <div style={{ fontWeight: '600', fontSize: '0.9rem', color: '#3b82f6' }}>{sys.virtualAccountNumber}</div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{sys.virtualBankName}</div>
+                        </div>
+                      ) : (
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No VA Assigned</span>
+                      )}
+                    </td>
+
+                    {/* Cash Balance */}
+                    <td>
+                      <div style={{ fontSize: '1.05rem', fontWeight: 'bold', color: sys.prepaidNairaBalance > 0 ? 'var(--success)' : 'var(--danger)' }}>
+                        {formatNaira(sys.prepaidNairaBalance)}
                       </div>
-                    )}
-                    {sys.generatorCapacity && (
+                      {/* Tariff Label */}
                       <div style={{ marginTop: '4px' }}>
-                        <span style={{ background: 'rgba(250,200,50,0.12)', color: '#f5c842', padding: '2px 7px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold', fontFamily: 'monospace' }}>
-                          ⚡ {sys.generatorCapacity} Generator
-                        </span>
+                        {isDiscounted ? (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: 'rgba(16,185,129,0.15)', color: 'var(--success)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold' }}>
+                            <BadgeCheck size={10} /> 50% Disc. (₦1,250/kWh)
+                          </span>
+                        ) : (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: 'rgba(255,255,255,0.03)', color: 'var(--text-muted)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.7rem' }}>
+                            Std. Tariff (₦2,500/kWh)
+                          </span>
+                        )}
                       </div>
-                    )}
-                  </td>
-                  
-                  {/* Virtual Account details */}
-                  <td>
-                    {sys.virtualAccountNumber ? (
-                      <div>
-                        <div style={{ fontWeight: '600', fontSize: '0.9rem', color: '#3b82f6' }}>{sys.virtualAccountNumber}</div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{sys.virtualBankName}</div>
-                      </div>
-                    ) : (
-                      <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No VA Assigned</span>
-                    )}
-                  </td>
+                    </td>
 
-                  {/* Cash Balance */}
-                  <td>
-                    <div style={{ fontSize: '1.05rem', fontWeight: 'bold', color: sys.prepaidNairaBalance > 0 ? 'var(--success)' : 'var(--danger)' }}>
-                      {formatNaira(sys.prepaidNairaBalance)}
-                    </div>
-                    {/* Tariff Label */}
-                    <div style={{ marginTop: '4px' }}>
-                      {isDiscounted ? (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: 'rgba(16,185,129,0.15)', color: 'var(--success)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold' }}>
-                          <BadgeCheck size={10} /> 50% Disc. (₦1,250/kWh)
-                        </span>
-                      ) : (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: 'rgba(255,255,255,0.03)', color: 'var(--text-muted)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.7rem' }}>
-                          Std. Tariff (₦2,500/kWh)
-                        </span>
-                      )}
-                    </div>
-                  </td>
-
-                  {/* Meter Live Telemetry */}
-                  <td>
-                    {sys.stronMeterId ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.8rem', fontFamily: 'monospace' }}>
-                        <div style={{ display: 'flex', gap: '8px', color: 'var(--text-main)' }}>
-                          <span>{sys.voltage?.toFixed(1) || '230.0'}V</span>
-                          <span>·</span>
-                          <span>{sys.current?.toFixed(2) || '0.00'}A</span>
-                          <span>·</span>
-                          <span style={{ color: 'var(--primary-accent)' }}>{sys.power?.toFixed(0) || '0'}W</span>
+                    {/* Meter Live Telemetry */}
+                    <td>
+                      {sys.stronMeterId ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.8rem', fontFamily: 'monospace' }}>
+                          <div style={{ display: 'flex', gap: '8px', color: 'var(--text-main)' }}>
+                            <span>{sys.voltage?.toFixed(1) || '0.0'}V</span>
+                            <span>·</span>
+                            <span>{sys.current?.toFixed(2) || '0.00'}A</span>
+                            <span>·</span>
+                            <span style={{ color: 'var(--primary-accent)' }}>{sys.power?.toFixed(0) || '0'}W</span>
+                          </div>
+                          <div style={{ display: 'flex', gap: '6px', marginTop: '2px' }}>
+                            {sys.relayState === "1" ? (
+                              <span style={{ background: 'rgba(16, 185, 129, 0.1)', color: 'var(--success)', padding: '1px 5px', borderRadius: '4px', fontSize: '0.7rem' }}>Relay Closed</span>
+                            ) : (
+                              <span style={{ background: 'rgba(239, 68, 68, 0.1)', color: 'var(--danger)', padding: '1px 5px', borderRadius: '4px', fontSize: '0.7rem' }}>Relay Open (Cut)</span>
+                            )}
+                            
+                            {sys.coverState === "1" && (
+                              <span style={{ background: 'rgba(245, 158, 11, 0.15)', color: 'var(--warning)', padding: '1px 5px', borderRadius: '4px', fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '2px' }}>
+                                <ShieldAlert size={10} /> Tamper
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        <div style={{ display: 'flex', gap: '6px', marginTop: '2px' }}>
-                          {sys.relayState === "1" ? (
-                            <span style={{ background: 'rgba(16, 185, 129, 0.1)', color: 'var(--success)', padding: '1px 5px', borderRadius: '4px', fontSize: '0.7rem' }}>Relay Closed</span>
-                          ) : (
-                            <span style={{ background: 'rgba(239, 68, 68, 0.1)', color: 'var(--danger)', padding: '1px 5px', borderRadius: '4px', fontSize: '0.7rem' }}>Relay Open (Cut)</span>
-                          )}
+                      ) : (
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Telemetry Offline</span>
+                      )}
+                    </td>
+
+                    {/* Energy units Remaining */}
+                    <td>
+                      <div className="progress-container">
+                        <div className="progress-track">
+                          <div className={`progress-fill ${s}`} style={{ width: `${percent}%` }}></div>
+                        </div>
+                        <div className="progress-text" style={{ color: remaining > 0 ? 'var(--success)' : 'var(--danger)' }}>
+                          {remaining.toFixed(2)} kWh remaining
+                        </div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                          <span>📥 Bought: <strong>{totalBought.toFixed(2)} kWh</strong></span>
+                          <span>📤 Used: <strong>{totalUsed.toFixed(2)} kWh</strong></span>
+                        </div>
+                      </div>
+                    </td>
+
+                    {/* Row actions */}
+                    <td>
+                      <div className="action-buttons" style={{ display: 'flex', gap: '8px' }}>
+                        {relayLoading === sys.id ? (
+                          <button className="action-btn" style={{ padding: '6px 12px', opacity: 0.6 }} disabled>
+                            ⏳ Sending...
+                          </button>
+                        ) : sys.relayState === '0' || sys.RelayState === '0' ? (
+                          <button onClick={(e) => { e.stopPropagation(); handleToggleState(sys.id, 'relay-on'); }} className="action-btn unlock" style={{ padding: '6px 12px' }}>
+                            <Unlock size={14} /> Close Relay
+                          </button>
+                        ) : (
+                          <button onClick={(e) => { e.stopPropagation(); handleToggleState(sys.id, 'relay-off'); }} className="action-btn disable" style={{ padding: '6px 12px' }}>
+                            <MinusCircle size={14} /> Lock Relay
+                          </button>
+                        )}
+                        
+                        <button 
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            setExpandedSystemId(expandedSystemId === sys.id ? null : sys.id); 
+                            setStronTokenResult(null); 
+                          }} 
+                          className="action-btn" 
+                          style={{ padding: '6px 12px', background: expandedSystemId === sys.id ? 'var(--primary-accent)' : 'rgba(255,255,255,0.03)', borderColor: expandedSystemId === sys.id ? 'var(--primary-accent)' : 'var(--border-color)', color: expandedSystemId === sys.id ? 'var(--bg-dark)' : 'white' }}
+                        >
+                          ⚙️ Manage Stron
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+
+                  {expandedSystemId === sys.id && (
+                    <tr style={{ background: 'rgba(255, 255, 255, 0.02)' }}>
+                      <td colSpan="6" style={{ padding: '20px', borderTop: '1px solid var(--border-color)', borderBottom: '1px solid var(--border-color)' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '24px' }}>
                           
-                          {sys.coverState === "1" && (
-                            <span style={{ background: 'rgba(245, 158, 11, 0.15)', color: 'var(--warning)', padding: '1px 5px', borderRadius: '4px', fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '2px' }}>
-                              <ShieldAlert size={10} /> Tamper
-                            </span>
-                          )}
+                          {/* Stron Remote Operations */}
+                          <div>
+                            <h4 style={{ color: 'white', marginBottom: '16px', fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              ⚡ Hunan Stron AMI Smart Meter Commands
+                            </h4>
+                            
+                            <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
+                              <button 
+                                onClick={() => handleAdminAction(sys.id, 'clear-tamper')}
+                                disabled={adminActionLoading}
+                                className="action-btn" 
+                                style={{ flex: 1, padding: '10px', background: 'rgba(245, 158, 11, 0.12)', color: 'var(--warning)', borderColor: 'rgba(245, 158, 11, 0.4)' }}
+                              >
+                                {adminActionLoading ? '⏳ Processing...' : 'Clear Tamper State'}
+                              </button>
+                              
+                              <button 
+                                onClick={() => {
+                                  if (confirm(`Are you sure you want to completely reset all credit on the physical meter and database for system ${sys.hardwareId}? This will lock the system and reset the balance to 0.`)) {
+                                    handleAdminAction(sys.id, 'clear-credit');
+                                  }
+                                }}
+                                disabled={adminActionLoading}
+                                className="action-btn" 
+                                style={{ flex: 1, padding: '10px', background: 'rgba(239, 68, 68, 0.12)', color: 'var(--danger)', borderColor: 'rgba(239, 68, 68, 0.4)' }}
+                              >
+                                {adminActionLoading ? '⏳ Processing...' : 'Clear Credit (Reset)'}
+                              </button>
+                            </div>
+
+                            {/* Token result display */}
+                            {stronTokenResult && (
+                              <div style={{ background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.4)', borderRadius: '6px', padding: '12px', marginBottom: '16px' }}>
+                                <div style={{ fontSize: '0.85rem', color: 'var(--success)', fontWeight: 'bold', marginBottom: '4px' }}>{stronTokenResult.message}</div>
+                                {stronTokenResult.token && (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '8px' }}>
+                                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>STS 20-Digit Keypad Code:</span>
+                                    <strong style={{ fontFamily: 'monospace', fontSize: '1.2rem', color: 'var(--primary-accent)', letterSpacing: '1px' }}>
+                                      {stronTokenResult.token}
+                                    </strong>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Transmit Custom Token */}
+                            <div style={{ marginTop: '12px' }}>
+                              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Transmit Custom STS Token (Remote OTA to Meter)</label>
+                              <div style={{ display: 'flex', gap: '8px' }}>
+                                <input 
+                                  type="text" 
+                                  value={manualToken} 
+                                  onChange={(e) => setManualToken(e.target.value)} 
+                                  placeholder="e.g. 2043 2769 0230 2834 8888" 
+                                  style={{ flex: 1, padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontFamily: 'monospace' }}
+                                />
+                                <button 
+                                  onClick={() => {
+                                    if (manualToken) {
+                                      handleAdminAction(sys.id, 'send-token', { token: manualToken });
+                                      setManualToken('');
+                                    }
+                                  }}
+                                  disabled={adminActionLoading || !manualToken}
+                                  className="action-btn"
+                                  style={{ padding: '8px 16px', background: 'var(--primary-accent)', color: 'var(--bg-dark)', borderColor: 'var(--primary-accent)' }}
+                                >
+                                  Send Token
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Meter Diagnostics Column */}
+                          <div style={{ borderLeft: '1px solid var(--border-color)', paddingLeft: '24px' }}>
+                            <h4 style={{ color: 'white', marginBottom: '16px', fontSize: '0.95rem' }}>📋 Live Telemetry Diagnostics</h4>
+                            <div style={{ background: 'var(--bg-dark)', padding: '12px', borderRadius: '6px', fontSize: '0.8rem', fontFamily: 'monospace', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                              <div><span style={{ color: 'white' }}>Meter Status:</span> {sys.meterOnline || sys.MeterOnline ? '🟢 Online (Connected)' : '🔴 Offline (Unreachable)'}</div>
+                              <div><span style={{ color: 'white' }}>Physical Switch (Relay):</span> {sys.relayState === '1' ? 'Closed (Power ON)' : 'Open (Power OFF)'}</div>
+                              <div><span style={{ color: 'white' }}>Cover State (Tamper):</span> {sys.coverState === '1' ? '⚠️ TAMPER ACTIVE (OPEN)' : 'Normal'}</div>
+                              <div><span style={{ color: 'white' }}>Voltage / Current:</span> {sys.voltage?.toFixed(1) || '0.0'} V / {sys.current?.toFixed(2) || '0.00'} A</div>
+                              <div><span style={{ color: 'white' }}>Active Load Draw:</span> {sys.power?.toFixed(0) || '0'} W (Max: {sys.maxLoadWatts || 2000} W)</div>
+                              <div><span style={{ color: 'white' }}>Cumulative Consumption:</span> {totalUsed.toFixed(2)} kWh</div>
+                              <div><span style={{ color: 'white' }}>Customer Phone/Email:</span> {sys.customerPhone || 'N/A'} / {sys.customerEmail || 'N/A'}</div>
+                              <div><span style={{ color: 'white' }}>Last Sync Time:</span> {sys.lastSyncTime ? new Date(sys.lastSyncTime).toLocaleString() : 'Never'}</div>
+                            </div>
+                          </div>
+
                         </div>
-                      </div>
-                    ) : (
-                      <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Telemetry Offline</span>
-                    )}
-                  </td>
-
-                  
-                  {/* Energy units Remaining */}
-                  <td>
-                    <div className="progress-container">
-                      <div className="progress-track">
-                        <div className={`progress-fill ${s}`} style={{ width: `${percent}%` }}></div>
-                      </div>
-                      <div className="progress-text" style={{ color: remaining > 0 ? 'var(--success)' : 'var(--danger)' }}>
-                        {remaining.toFixed(2)} kWh remaining
-                      </div>
-                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '1px' }}>
-                        <span>📥 Bought: <strong>{totalBought.toFixed(2)} kWh</strong></span>
-                        <span>📤 Used: <strong>{totalUsed.toFixed(2)} kWh</strong></span>
-                      </div>
-                    </div>
-                  </td>
-
-                  {/* Row actions */}
-                  <td>
-                    <div className="action-buttons">
-                      {relayLoading === sys.id ? (
-                        <button className="action-btn" style={{ padding: '6px 12px', opacity: 0.6 }} disabled>
-                          ⏳ Sending...
-                        </button>
-                      ) : sys.relayState === '0' || sys.RelayState === '0' ? (
-                        <button onClick={() => handleToggleState(sys.id, 'relay-on')} className="action-btn unlock" style={{ padding: '6px 12px' }}>
-                          <Unlock size={14} /> Close Relay
-                        </button>
-                      ) : (
-                        <button onClick={() => handleToggleState(sys.id, 'relay-off')} className="action-btn disable" style={{ padding: '6px 12px' }}>
-                          <MinusCircle size={14} /> Lock Relay
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
               );
             })}
             {filteredSystems.length === 0 && !loading && (
