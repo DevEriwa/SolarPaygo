@@ -6,6 +6,11 @@ export default function Dashboard({ dashboardData, loading, refreshData }) {
   const [filter, setFilter] = useState('All');
   
   // Registration modal states
+  const [activeView, setActiveView] = useState('generators'); // 'generators' or 'customers'
+  const [expandedCustomerId, setExpandedCustomerId] = useState(null);
+  const [customerTransactions, setCustomerTransactions] = useState({});
+  const [loadingTransactions, setLoadingTransactions] = useState({});
+
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [regHardwareId, setRegHardwareId] = useState('');
   const [regOwnerName, setRegOwnerName] = useState('');
@@ -105,6 +110,28 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
     }
   };
 
+  const fetchCustomerTransactions = async (systemId) => {
+    if (customerTransactions[systemId]) return; // already loaded
+    setLoadingTransactions(prev => ({ ...prev, [systemId]: true }));
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${BASE_URL}/dashboard/systems/${systemId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setCustomerTransactions(prev => ({ 
+          ...prev, 
+          [systemId]: data.recentTransactions || [] 
+        }));
+      }
+    } catch (err) {
+      console.error("Failed to load customer transactions", err);
+    } finally {
+      setLoadingTransactions(prev => ({ ...prev, [systemId]: false }));
+    }
+  };
+
   const [expandedSystemId, setExpandedSystemId] = useState(null);
   const [stronTokenResult, setStronTokenResult] = useState(null);
   const [manualToken, setManualToken] = useState('');
@@ -190,8 +217,52 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
         </div>
       </div>
 
-      {/* STATS GRID */}
-      <div className="stats-grid">
+      {/* View Switcher Tabs */}
+      <div style={{ display: 'flex', gap: '12px', marginBottom: '28px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+        <button 
+          onClick={() => setActiveView('generators')} 
+          style={{
+            padding: '10px 20px', 
+            borderRadius: '6px', 
+            background: activeView === 'generators' ? 'var(--primary-accent)' : 'transparent',
+            color: activeView === 'generators' ? 'var(--bg-dark)' : 'var(--text-muted)',
+            border: 'none',
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            fontSize: '0.9rem',
+            transition: 'all 0.2s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}
+        >
+          ⚡ Generators & Telemetry
+        </button>
+        <button 
+          onClick={() => setActiveView('customers')} 
+          style={{
+            padding: '10px 20px', 
+            borderRadius: '6px', 
+            background: activeView === 'customers' ? 'var(--primary-accent)' : 'transparent',
+            color: activeView === 'customers' ? 'var(--bg-dark)' : 'var(--text-muted)',
+            border: 'none',
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            fontSize: '0.9rem',
+            transition: 'all 0.2s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}
+        >
+          👤 Customer Profiles & Payments
+        </button>
+      </div>
+
+      {activeView === 'generators' ? (
+        <div>
+          {/* STATS GRID */}
+          <div className="stats-grid">
         <div className="stat-card">
           <h3>Total Devices</h3>
           <div className="value blue">{systems.length}</div>
@@ -523,8 +594,183 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
           {(!(summary.recentPayments || summary.RecentPayments) || (summary.recentPayments || summary.RecentPayments).length === 0) && !loading && (
             <div style={{ color: 'var(--text-muted)', padding: '20px' }}>No recent payments today.</div>
           )}
+          </div>
         </div>
       </div>
+
+      ) : (
+        /* CUSTOMERS & TRANSACTIONS DATABASE VIEW */
+        <div className="glass-panel" style={{ width: '100%' }}>
+          <div className="panel-header" style={{ marginBottom: '20px' }}>
+            <h2>Registered Customers & Account Information</h2>
+          </div>
+          
+          <div className="table-responsive">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Customer Name & Contact</th>
+                  <th>System & Meter Profile</th>
+                  <th>Squad Virtual Account</th>
+                  <th>Naira Balance</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {systems.map(sys => {
+                  const txs = customerTransactions[sys.id] || [];
+                  const txsLoading = loadingTransactions[sys.id];
+                  const isExpanded = expandedCustomerId === sys.id;
+
+                  return (
+                    <React.Fragment key={sys.id}>
+                      <tr 
+                        onClick={() => {
+                          if (isExpanded) {
+                            setExpandedCustomerId(null);
+                          } else {
+                            setExpandedCustomerId(sys.id);
+                            fetchCustomerTransactions(sys.id);
+                          }
+                        }}
+                        style={{ cursor: 'pointer', background: isExpanded ? 'rgba(255,255,255,0.02)' : '' }}
+                      >
+                        {/* Name & Contact */}
+                        <td>
+                          <div style={{ fontWeight: 'bold', color: 'white', fontSize: '0.95rem' }}>{sys.ownerName || 'Unnamed Customer'}</div>
+                          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <span>📧 {sys.customerEmail || 'No Email'}</span>
+                            <span>📞 {sys.customerPhone || 'No Phone'}</span>
+                          </div>
+                        </td>
+
+                        {/* System Identifiers */}
+                        <td>
+                          <div style={{ fontSize: '0.85rem', color: 'white', fontFamily: 'monospace' }}>HW ID: {sys.hardwareId}</div>
+                          {sys.stronMeterId && (
+                            <div style={{ fontSize: '0.8rem', color: 'var(--primary-accent)', marginTop: '4px', fontFamily: 'monospace' }}>
+                              Meter ID: {sys.stronMeterId}
+                            </div>
+                          )}
+                          {sys.generatorCapacity && (
+                            <div style={{ marginTop: '4px' }}>
+                              <span style={{ background: 'rgba(250,200,50,0.1)', color: '#f5c842', padding: '2px 6px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 'bold' }}>
+                                ⚡ {sys.generatorCapacity} Generator
+                              </span>
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Squad Account */}
+                        <td>
+                          {sys.virtualAccountNumber ? (
+                            <div>
+                              <div style={{ fontWeight: 'bold', fontSize: '0.9rem', color: '#3b82f6', fontFamily: 'monospace' }}>{sys.virtualAccountNumber}</div>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{sys.virtualBankName}</div>
+                            </div>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No VA Assigned</span>
+                          )}
+                        </td>
+
+                        {/* Cash Balance */}
+                        <td>
+                          <div style={{ fontSize: '1.05rem', fontWeight: 'bold', color: sys.prepaidNairaBalance > 0 ? 'var(--success)' : 'var(--danger)' }}>
+                            {formatNaira(sys.prepaidNairaBalance)}
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                            {sys.availableUnits?.toFixed(2)} kWh energy left
+                          </div>
+                        </td>
+
+                        {/* Actions */}
+                        <td>
+                          <button 
+                            className="action-btn" 
+                            style={{ 
+                              padding: '6px 12px', 
+                              background: isExpanded ? 'var(--primary-accent)' : 'rgba(255,255,255,0.03)', 
+                              borderColor: isExpanded ? 'var(--primary-accent)' : 'var(--border-color)', 
+                              color: isExpanded ? 'var(--bg-dark)' : 'white' 
+                            }}
+                          >
+                            {isExpanded ? 'Hide History' : 'View Profile & History'}
+                          </button>
+                        </td>
+                      </tr>
+
+                      {/* EXPANDED PROFILE & HISTORY DETAILS */}
+                      {isExpanded && (
+                        <tr style={{ background: 'rgba(0, 0, 0, 0.2)' }}>
+                          <td colSpan="5" style={{ padding: '24px', borderTop: '1px solid var(--border-color)', borderBottom: '1px solid var(--border-color)' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '32px' }}>
+                              
+                              {/* Complete Profile Cards */}
+                              <div>
+                                <h3 style={{ color: 'white', marginBottom: '16px', fontSize: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  👤 Profile Details
+                                </h3>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '0.85rem' }}>
+                                  <div><strong style={{ color: 'var(--text-muted)' }}>Full Name:</strong> <span style={{ color: 'white' }}>{sys.ownerName}</span></div>
+                                  <div><strong style={{ color: 'var(--text-muted)' }}>Gender:</strong> <span style={{ color: 'white' }}>{sys.customerGender === '1' ? 'Male' : sys.customerGender === '2' ? 'Female' : 'Other'}</span></div>
+                                  <div><strong style={{ color: 'var(--text-muted)' }}>Date of Birth:</strong> <span style={{ color: 'white' }}>{sys.customerDob || 'N/A'}</span></div>
+                                  <div><strong style={{ color: 'var(--text-muted)' }}>BVN Number:</strong> <span style={{ color: 'white', letterSpacing: '1px' }}>{sys.customerBvn || 'N/A'}</span></div>
+                                  <div><strong style={{ color: 'var(--text-muted)' }}>Email Address:</strong> <span style={{ color: 'white' }}>{sys.customerEmail}</span></div>
+                                  <div><strong style={{ color: 'var(--text-muted)' }}>Phone Number:</strong> <span style={{ color: 'white' }}>{sys.customerPhone}</span></div>
+                                  <div><strong style={{ color: 'var(--text-muted)' }}>System Capacity:</strong> <span style={{ color: 'white' }}>{sys.generatorCapacity} ({sys.maxLoadWatts}W limit)</span></div>
+                                </div>
+                              </div>
+
+                              {/* Payment history */}
+                              <div>
+                                <h3 style={{ color: 'white', marginBottom: '16px', fontSize: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  💳 Transaction & STS Token History
+                                </h3>
+                                {txsLoading ? (
+                                  <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', padding: '20px 0' }}>⏳ Fetching records from payment gateway...</div>
+                                ) : txs.length === 0 ? (
+                                  <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', padding: '20px 0' }}>No transactions recorded for this customer.</div>
+                                ) : (
+                                  <div style={{ maxHeight: '250px', overflowY: 'auto' }}>
+                                    <table style={{ width: '100%', fontSize: '0.8rem', borderCollapse: 'collapse', textAlign: 'left' }}>
+                                      <thead>
+                                        <tr style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-color)' }}>
+                                          <th style={{ padding: '8px' }}>Date</th>
+                                          <th style={{ padding: '8px' }}>Amount Paid</th>
+                                          <th style={{ padding: '8px' }}>Units Credited</th>
+                                          <th style={{ padding: '8px' }}>Generated STS Token</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {txs.map((tx, idx) => (
+                                          <tr key={tx.id || idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                                            <td style={{ padding: '8px', color: 'var(--text-muted)' }}>{new Date(tx.transactionDate).toLocaleString()}</td>
+                                            <td style={{ padding: '8px', fontWeight: 'bold', color: 'var(--success)' }}>{formatNaira(tx.amountPaid)}</td>
+                                            <td style={{ padding: '8px', color: 'white' }}>{tx.unitsAdded?.toFixed(2)} kWh</td>
+                                            <td style={{ padding: '8px', fontFamily: 'monospace', color: 'var(--primary-accent)', fontWeight: 'bold' }}>{tx.stsToken || 'OTA Sent'}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                              </div>
+
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+                {systems.length === 0 && (
+                  <tr><td colSpan="5" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px' }}>No registered customers found.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* REGISTRATION MODAL */}
       {isRegisterOpen && (
