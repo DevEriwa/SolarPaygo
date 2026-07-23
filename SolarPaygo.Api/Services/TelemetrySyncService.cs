@@ -167,13 +167,25 @@ namespace SolarPaygo.Api.Services
                                     sys.DailyAmountCharged += amountToDeduct;
                                 }
 
+                                // Core Business Rule: Balance == 0 -> Cut Power (Lock Relay); Balance > 0 -> Enable Power (Close Relay)
                                 if (sys.PrepaidNairaBalance <= 0 || sys.AvailableUnits <= 0)
                                 {
-                                    if (sys.Status != "Locked")
+                                    if (sys.Status != "Locked" || sys.RelayState != "0")
                                     {
+                                        _logger.LogWarning("[TelemetrySync] Balance depleted for system {Id} (Balance: ₦{Bal}, Units: {Units} kWh). Cutting power relay.", sys.Id, sys.PrepaidNairaBalance, sys.AvailableUnits);
                                         sys.Status = "Locked";
                                         sys.RelayState = "0";
                                         await vendingService.SetRemoteSwitchAsync(sys.StronMeterId, turnOn: false);
+                                    }
+                                }
+                                else if (sys.PrepaidNairaBalance > 0 && sys.AvailableUnits > 0)
+                                {
+                                    if (sys.Status == "Locked" || sys.RelayState == "0")
+                                    {
+                                        _logger.LogInformation("[TelemetrySync] Positive balance detected for system {Id} (Balance: ₦{Bal}, Units: {Units} kWh). Restoring power relay.", sys.Id, sys.PrepaidNairaBalance, sys.AvailableUnits);
+                                        sys.Status = "Active";
+                                        sys.RelayState = "1";
+                                        await vendingService.SetRemoteSwitchAsync(sys.StronMeterId, turnOn: true);
                                     }
                                 }
                             }

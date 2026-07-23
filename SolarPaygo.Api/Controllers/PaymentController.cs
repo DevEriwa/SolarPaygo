@@ -268,6 +268,18 @@ namespace SolarPaygo.Api.Controllers
             string stsToken = vendResult.Token;
             decimal actualUnitsVended = vendResult.Units;
 
+            // 1. Transmit generated STS token directly to the physical meter over the air (GPRS/OTA)
+            _logger.LogInformation("[ProcessPayment] Transmitting STS token {Token} OTA to physical meter {MeterId}...", stsToken, system.StronMeterId);
+            bool otaSuccess = await _vendingService.SendTokenRemotelyAsync(system.StronMeterId, stsToken);
+            if (otaSuccess)
+            {
+                _logger.LogInformation("[ProcessPayment] OTA Token transmission SUCCESSFUL for meter {MeterId}", system.StronMeterId);
+            }
+            else
+            {
+                _logger.LogWarning("[ProcessPayment] OTA Token transmission did not confirm for meter {MeterId}. Token is still sent via Email/SMS for keypad entry.", system.StronMeterId);
+            }
+
             // Update database records
             var transaction = new Transaction
             {
@@ -285,13 +297,14 @@ namespace SolarPaygo.Api.Controllers
             system.PrepaidNairaBalance += amountPaid;
             system.CumulativeKwhBought += actualUnitsVended; // Track total units ever purchased
 
-            // Remotely Unlock system relay if it was Locked and now has balance/units
-            if (system.Status == "Locked" && system.AvailableUnits > 0)
+            // 2. Automatically set system Active and close relay (Turn ON power) when balance/units > 0
+            if (system.AvailableUnits > 0 || system.PrepaidNairaBalance > 0)
             {
                 system.Status = "Active";
                 system.RelayState = "1";
                 if (!string.IsNullOrWhiteSpace(system.StronMeterId))
                 {
+                    _logger.LogInformation("[ProcessPayment] Sending Remote Switch ON command to meter {MeterId}...", system.StronMeterId);
                     await _vendingService.SetRemoteSwitchAsync(system.StronMeterId, turnOn: true);
                 }
             }
