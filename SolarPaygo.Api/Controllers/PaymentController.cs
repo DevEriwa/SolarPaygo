@@ -246,10 +246,6 @@ namespace SolarPaygo.Api.Controllers
                 return (false, "No solar system found matching the payment details", null, null);
             }
 
-            // Calculate billing rate based on pricing model (₦2,500/kWh base, ₦1,250/kWh if > 500 kWh used)
-            decimal rate = system.CumulativeKwhConsumed >= 500 ? 1250m : 2500m;
-            decimal unitsToReceive = amountPaid / rate;
-
             // Require a linked Stron Meter ID — no meter, no token
             if (string.IsNullOrWhiteSpace(system.StronMeterId))
             {
@@ -257,19 +253,38 @@ namespace SolarPaygo.Api.Controllers
                 return (false, "Configuration error: No meter ID is linked to this solar system. Please contact your administrator to complete the setup before making a payment.", null, null);
             }
 
+            // Calculate billing rate based on pricing model (₦2,500/kWh base, ₦1,250/kWh if > 500 kWh used)
+            decimal rate = system.CumulativeKwhConsumed >= 500 ? 1250m : 2500m;
+            
+            // Add paid amount to customer balance
+            system.PrepaidNairaBalance += amountPaid;
+
+            // Minimum top-up threshold: ₦250 (which equals 0.1 kWh at ₦2,500/kWh rate)
+            // If accumulated balance is less than ₦250, credit balance and wait for next top-up
+            if (system.PrepaidNairaBalance < 250m)
+            {
+                _logger.LogInformation("[ProcessPayment] Payment of ₦{Amount} added to balance for account {Acc}. Total balance: ₦{Bal} (below ₦250 minimum token threshold).", amountPaid, virtualAccountNumber, system.PrepaidNairaBalance);
+                await _context.SaveChangesAsync();
+                return (true, $"Payment of ₦{amountPaid:N2} added to balance. Total balance is ₦{system.PrepaidNairaBalance:N2}. Minimum ₦250 required to generate a 0.1 kWh token.", null, system);
+            }
+
+            // Calculate units to vend for the available balance in exact 0.1 kWh steps
+            decimal unitsToReceive = Math.Round(system.PrepaidNairaBalance / rate, 1, MidpointRounding.AwayFromZero);
+            if (unitsToReceive < 0.1m) unitsToReceive = 0.1m;
+
             // Call Stron API to generate a real STS vending token
             var vendResult = await _vendingService.GenerateVendingTokenAsync(system.StronMeterId, unitsToReceive, isVendByUnit: true);
             if (vendResult == null)
             {
-                _logger.LogError("[ProcessPayment] Stron API returned no token for meter {MeterId}. Aborting transaction — no money will be deducted.", system.StronMeterId);
-                return (false, "Payment could not be completed: The meter vending server is temporarily unavailable. Your account has NOT been charged. Please try again in a few minutes or contact support.", null, null);
+                _logger.LogError("[ProcessPayment] Stron API returned no token for meter {MeterId}. Aborting transaction — balance preserved.", system.StronMeterId);
+                return (false, "Payment could not be completed: The meter vending server is temporarily unavailable. Your account balance is preserved. Please try again in a few minutes or contact support.", null, null);
             }
 
             string stsToken = vendResult.Token;
-            decimal actualUnitsVended = vendResult.Units;
+            decimal actualUnitsVended = vendResult.Units > 0 ? vendResult.Units : unitsToReceive;
 
             // 1. Transmit generated STS token directly to the physical meter over the air (GPRS/OTA)
-            _logger.LogInformation("[ProcessPayment] Transmitting STS token {Token} OTA to physical meter {MeterId}...", stsToken, system.StronMeterId);
+            _logger.LogInformation("[ProcessPayment] Transmitting STS token {Token} ({Units} kWh) OTA to physical meter {MeterId}...", stsToken, actualUnitsVended, system.StronMeterId);
             bool otaSuccess = await _vendingService.SendTokenRemotelyAsync(system.StronMeterId, stsToken);
             if (otaSuccess)
             {
@@ -292,9 +307,8 @@ namespace SolarPaygo.Api.Controllers
                 TransactionDate = DateTime.UtcNow
             };
 
-            // Update system units and Naira cash balance
+            // Update system units
             system.AvailableUnits += actualUnitsVended;
-            system.PrepaidNairaBalance += amountPaid;
             system.CumulativeKwhBought += actualUnitsVended; // Track total units ever purchased
 
             // 2. Automatically set system Active and close relay (Turn ON power) when balance/units > 0
