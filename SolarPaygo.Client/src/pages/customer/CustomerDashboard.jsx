@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Zap, Activity, Wallet, Copy, CheckCircle2, History } from 'lucide-react';
+import { Zap, Activity, Wallet, Coins, Copy, CheckCircle2, History } from 'lucide-react';
 import { BASE_URL } from '../../config';
 import * as signalR from '@microsoft/signalr';
 
@@ -162,6 +162,16 @@ export default function CustomerDashboard() {
         </div>
 
         <div className="stat-card">
+          <div className="stat-icon" style={{background: 'rgba(250, 204, 21, 0.1)', color: '#facc15'}}>
+            <Coins size={24} />
+          </div>
+          <div className="stat-info">
+            <h3>Pending Wallet</h3>
+            <div className="stat-value">{formatNaira(system.pendingWalletBalance)}</div>
+          </div>
+        </div>
+
+        <div className="stat-card">
           <div className="stat-icon" style={{background: 'rgba(234, 179, 8, 0.1)', color: '#eab308'}}>
             <Activity size={24} />
           </div>
@@ -171,6 +181,10 @@ export default function CustomerDashboard() {
           </div>
         </div>
       </div>
+      <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '-16px', marginBottom: '24px' }}>
+        <Coins size={12} style={{ verticalAlign: 'middle', marginRight: '4px' }} />
+        Pending Wallet is money you've paid that hasn't converted into an energy token yet — it converts automatically once it reaches the minimum for your rate.
+      </p>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginTop: '24px' }}>
         {/* Payment / Virtual Account Info */}

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Lock, Unlock, MinusCircle, CreditCard, Plus, Activity, User, ShieldAlert, BadgeCheck, Phone, Mail, FileText } from 'lucide-react';
 import { BASE_URL } from '../config';
 
-export default function Dashboard({ dashboardData, loading, refreshData }) {
+export default function Dashboard({ dashboardData, loading, refreshData, pricePlans = [] }) {
   const [filter, setFilter] = useState('All');
   
   // Registration modal states
@@ -21,6 +21,7 @@ export default function Dashboard({ dashboardData, loading, refreshData }) {
   const [regGender, setRegGender] = useState('');
   const [regDob, setRegDob] = useState('');
   const [regGeneratorCapacity, setRegGeneratorCapacity] = useState('2KV');
+  const [regPricePlanId, setRegPricePlanId] = useState('');
   const [regError, setRegError] = useState(null);
   const [regSuccess, setRegSuccess] = useState(false);
   const [regLoading, setRegLoading] = useState(false);
@@ -55,7 +56,8 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
           customerBvn: regBvn.trim(),
           customerDob: formattedDob,
           customerGender: regGender,
-          generatorCapacity: regGeneratorCapacity
+          generatorCapacity: regGeneratorCapacity,
+          pricePlanId: regPricePlanId ? parseInt(regPricePlanId, 10) : null
         })
       });
 
@@ -69,6 +71,7 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
         setRegBvn('');
         setRegDob('');
         setRegGeneratorCapacity('2KV');
+        setRegPricePlanId('');
         refreshData();
         setTimeout(() => setIsRegisterOpen(false), 2000);
       } else {
@@ -107,6 +110,35 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
       console.error(`Failed to ${action} system ${id}`);
     } finally {
       setRelayLoading(null);
+    }
+  };
+
+  const [bandAssignLoading, setBandAssignLoading] = useState(null); // id of system being assigned
+  const [bandAssignError, setBandAssignError] = useState(null);
+
+  const handleAssignBand = async (systemId, pricePlanId) => {
+    setBandAssignLoading(systemId);
+    setBandAssignError(null);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${BASE_URL}/priceplan/assign`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ solarSystemId: systemId, pricePlanId: pricePlanId ? parseInt(pricePlanId, 10) : null })
+      });
+      if (response.ok) {
+        refreshData();
+      } else {
+        const txt = await response.text();
+        setBandAssignError(txt || 'Failed to assign price band.');
+      }
+    } catch {
+      setBandAssignError('Connection to backend API failed.');
+    } finally {
+      setBandAssignLoading(null);
     }
   };
 
@@ -325,7 +357,14 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
               const generatorCapacityKw = parseFloat((sys.generatorCapacity || '2KV').replace(/[^0-9.]/g, '')) || 2;
               const maxCapacityKwh = generatorCapacityKw * 100; // display scale
               const percent = Math.min((remaining / Math.max(totalBought, 1)) * 100, 100).toFixed(0);
-              const isDiscounted = sys.cumulativeKwhConsumed >= 500;
+              const plan = sys.pricePlan;
+              const loyaltyActive = plan
+                ? (plan.loyaltyDiscountEnabled && sys.cumulativeKwhConsumed >= plan.loyaltyThresholdKwh)
+                : (sys.cumulativeKwhConsumed >= 500);
+              const effectiveRate = plan
+                ? (loyaltyActive ? plan.pricePerKwh * (1 - plan.loyaltyDiscountPercent / 100) : plan.pricePerKwh)
+                : (loyaltyActive ? 1250 : 2500);
+              const isDiscounted = loyaltyActive;
                          return (
                 <React.Fragment key={sys.id}>
                   <tr 
@@ -371,14 +410,19 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                         {formatNaira(sys.prepaidNairaBalance)}
                       </div>
                       {/* Tariff Label */}
-                      <div style={{ marginTop: '4px' }}>
+                      <div style={{ marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                        {plan && (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: 'rgba(59,130,246,0.15)', color: '#3b82f6', padding: '2px 6px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 'bold', width: 'fit-content' }}>
+                            {plan.name || `Band ${plan.band}`}
+                          </span>
+                        )}
                         {isDiscounted ? (
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: 'rgba(16,185,129,0.15)', color: 'var(--success)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold' }}>
-                            <BadgeCheck size={10} /> 50% Disc. (₦1,250/kWh)
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: 'rgba(16,185,129,0.15)', color: 'var(--success)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold', width: 'fit-content' }}>
+                            <BadgeCheck size={10} /> {plan ? `${plan.loyaltyDiscountPercent}% Disc.` : '50% Disc.'} (₦{effectiveRate.toFixed(0)}/kWh)
                           </span>
                         ) : (
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: 'rgba(255,255,255,0.03)', color: 'var(--text-muted)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.7rem' }}>
-                            Std. Tariff (₦2,500/kWh)
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: 'rgba(255,255,255,0.03)', color: 'var(--text-muted)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.7rem', width: 'fit-content' }}>
+                            Std. Tariff (₦{effectiveRate.toFixed(0)}/kWh)
                           </span>
                         )}
                       </div>
@@ -604,7 +648,14 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
           <div className="panel-header" style={{ marginBottom: '20px' }}>
             <h2>Registered Customers & Account Information</h2>
           </div>
-          
+
+          {bandAssignError && (
+            <div style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)', color: 'var(--danger)', borderRadius: '8px', padding: '10px 16px', margin: '0 0 12px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.88rem' }}>
+              <span>⚠️ {bandAssignError}</span>
+              <button onClick={() => setBandAssignError(null)} style={{ background: 'transparent', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: '1.1rem', lineHeight: 1 }}>×</button>
+            </div>
+          )}
+
           <div className="table-responsive">
             <table className="data-table">
               <thead>
@@ -718,6 +769,25 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                                   <div><strong style={{ color: 'var(--text-muted)' }}>Email Address:</strong> <span style={{ color: 'white' }}>{sys.customerEmail}</span></div>
                                   <div><strong style={{ color: 'var(--text-muted)' }}>Phone Number:</strong> <span style={{ color: 'white' }}>{sys.customerPhone}</span></div>
                                   <div><strong style={{ color: 'var(--text-muted)' }}>System Capacity:</strong> <span style={{ color: 'white' }}>{sys.generatorCapacity} ({sys.maxLoadWatts}W limit)</span></div>
+                                  <div><strong style={{ color: 'var(--text-muted)' }}>Pending Wallet:</strong> <span style={{ color: 'white' }}>{formatNaira(sys.pendingWalletBalance)}</span> <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>(not yet converted to units)</span></div>
+                                  <div>
+                                    <strong style={{ color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>Price Band:</strong>
+                                    <select
+                                      value={sys.pricePlanId || ''}
+                                      disabled={bandAssignLoading === sys.id}
+                                      onChange={(e) => handleAssignBand(sys.id, e.target.value)}
+                                      onClick={(e) => e.stopPropagation()}
+                                      style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.85rem' }}
+                                    >
+                                      <option value="">No band — standard pricing</option>
+                                      {pricePlans.map(p => (
+                                        <option key={p.id} value={p.id}>{p.name || `Band ${p.band}`} — ₦{p.pricePerKwh}/kWh</option>
+                                      ))}
+                                    </select>
+                                    {bandAssignLoading === sys.id && (
+                                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Saving...</span>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
 
@@ -822,6 +892,16 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                   <option value="10KV">10KV – Industrial</option>
                 </select>
                 <span style={{ fontSize: '0.7rem', color: 'var(--warning)', marginTop: '4px', display: 'block' }}>⚠️ Load must not exceed 90% of this capacity or the relay will automatically trip off.</span>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Price Band (optional)</label>
+                <select value={regPricePlanId} onChange={(e) => setRegPricePlanId(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }}>
+                  <option value="">No band — standard pricing</option>
+                  {pricePlans.map(p => (
+                    <option key={p.id} value={p.id}>{p.name || `Band ${p.band}`} — ₦{p.pricePerKwh}/kWh</option>
+                  ))}
+                </select>
               </div>
 
               <div>

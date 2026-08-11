@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using SolarPaygo.Api.Data;
 
@@ -11,9 +12,11 @@ using SolarPaygo.Api.Data;
 namespace SolarPaygo.Api.Migrations
 {
     [DbContext(typeof(SolarDbContext))]
-    partial class SolarDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260810112746_AddPricePlans")]
+    partial class AddPricePlans
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -40,12 +43,6 @@ namespace SolarPaygo.Api.Migrations
                     b.Property<bool>("LoyaltyDiscountEnabled")
                         .HasColumnType("bit");
 
-                    b.Property<decimal>("LoyaltyDiscountPercent")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<decimal>("LoyaltyThresholdKwh")
-                        .HasColumnType("decimal(18,2)");
-
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -53,14 +50,8 @@ namespace SolarPaygo.Api.Migrations
                     b.Property<decimal>("PricePerKwh")
                         .HasColumnType("decimal(18,2)");
 
-                    b.Property<decimal>("TimeFloorMinimumKwh")
-                        .HasColumnType("decimal(18,2)");
-
                     b.Property<bool>("TimeFloorProtectionEnabled")
                         .HasColumnType("bit");
-
-                    b.Property<decimal>("TimeFloorRatePerHour")
-                        .HasColumnType("decimal(18,2)");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2");
@@ -140,9 +131,6 @@ namespace SolarPaygo.Api.Migrations
 
                     b.Property<string>("OwnerName")
                         .HasColumnType("nvarchar(max)");
-
-                    b.Property<decimal>("PendingWalletBalance")
-                        .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal>("Power")
                         .HasColumnType("decimal(18,2)");

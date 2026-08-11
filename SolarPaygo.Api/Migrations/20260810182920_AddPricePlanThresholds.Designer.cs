@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using SolarPaygo.Api.Data;
 
@@ -11,9 +12,11 @@ using SolarPaygo.Api.Data;
 namespace SolarPaygo.Api.Migrations
 {
     [DbContext(typeof(SolarDbContext))]
-    partial class SolarDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260810182920_AddPricePlanThresholds")]
+    partial class AddPricePlanThresholds
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -140,9 +143,6 @@ namespace SolarPaygo.Api.Migrations
 
                     b.Property<string>("OwnerName")
                         .HasColumnType("nvarchar(max)");
-
-                    b.Property<decimal>("PendingWalletBalance")
-                        .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal>("Power")
                         .HasColumnType("decimal(18,2)");

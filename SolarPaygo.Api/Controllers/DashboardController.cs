@@ -42,7 +42,7 @@ namespace SolarPaygo.Api.Controllers
         [HttpGet("systems")]
         public async Task<IActionResult> GetDashboardSummary()
         {
-            var systems = await _context.SolarSystems.ToListAsync();
+            var systems = await _context.SolarSystems.Include(s => s.PricePlan).ToListAsync();
 
             // Calculate today's revenue
             var today = DateTime.UtcNow.Date;
@@ -73,11 +73,17 @@ namespace SolarPaygo.Api.Controllers
                 s.Id, s.HardwareId, s.Status, s.AvailableUnits, s.OwnerName, s.StronMeterId,
                 s.VirtualAccountNumber, s.VirtualBankName, s.CustomerEmail, s.CustomerPhone,
                 s.CustomerBvn, s.CustomerDob, s.CustomerGender,
-                s.PrepaidNairaBalance, s.CumulativeKwhConsumed, s.CumulativeKwhBought,
+                s.PrepaidNairaBalance, s.PendingWalletBalance, s.CumulativeKwhConsumed, s.CumulativeKwhBought,
                 s.LastSyncTime, s.LastSyncKwh, s.MaxLoadWatts,
                 s.DailyKwhConsumed, s.DailyTimeActiveHours, s.DailyAmountCharged,
                 s.Voltage, s.Current, s.Power, s.RelayState, s.CoverState,
                 s.GeneratorCapacity,
+                s.PricePlanId,
+                PricePlan = s.PricePlan == null ? null : new {
+                    s.PricePlan.Id, s.PricePlan.Band, s.PricePlan.Name, s.PricePlan.PricePerKwh,
+                    s.PricePlan.LoyaltyDiscountEnabled, s.PricePlan.LoyaltyThresholdKwh, s.PricePlan.LoyaltyDiscountPercent,
+                    s.PricePlan.TimeFloorProtectionEnabled, s.PricePlan.TimeFloorRatePerHour, s.PricePlan.TimeFloorMinimumKwh
+                },
                 MeterOnline = s.LastSyncTime.HasValue && (DateTime.UtcNow - s.LastSyncTime.Value).TotalMinutes < 15
             }).ToList();
 
@@ -153,20 +159,12 @@ namespace SolarPaygo.Api.Controllers
                     sys.AvailableUnits -= kwhUsed;
                     if (sys.AvailableUnits < 0) sys.AvailableUnits = 0;
 
-                    // Rate is ₦2,500/kWh base, ₦1,250/kWh (50% discount) if cumulative > 500 kWh
-                    decimal rate = sys.CumulativeKwhConsumed >= 500m ? 1250m : 2500m;
+                    // Rate/billing floor resolved via PricingEngine — uses the system's assigned
+                    // price plan if any, otherwise falls back to legacy hardcoded pricing.
+                    decimal rate = PricingEngine.ResolveRate(sys);
+                    decimal targetDailyCharge = PricingEngine.ComputeTargetDailyCharge(sys, rate);
 
-                    // A) Calculate energy charge and time charge so far today
-                    decimal energyCharge = sys.DailyKwhConsumed * rate;
-                    decimal timeCharge = sys.DailyTimeActiveHours * 313m;
-                    
-                    // B) The strict minimum charge for the day if ANY power is used is 0.3 kWh worth
-                    decimal minimumDailyCharge = 0.3m * rate;
-
-                    // C) Target daily charge is the highest of the three scenarios
-                    decimal targetDailyCharge = Math.Max(minimumDailyCharge, Math.Max(energyCharge, timeCharge));
-
-                    // D) Deduct the difference between what they SHOULD pay for today and what they ALREADY paid today
+                    // Deduct the difference between what they SHOULD pay for today and what they ALREADY paid today
                     decimal amountToDeduct = targetDailyCharge - sys.DailyAmountCharged;
 
                     if (amountToDeduct > 0)
@@ -208,7 +206,7 @@ namespace SolarPaygo.Api.Controllers
         [HttpGet("systems/{id}")]
         public async Task<IActionResult> GetSystemDetails(int id)
         {
-            var system = await _context.SolarSystems.FindAsync(id);
+            var system = await _context.SolarSystems.Include(s => s.PricePlan).FirstOrDefaultAsync(s => s.Id == id);
             if (system == null) return NotFound();
 
             // Sync this specific system before returning details
@@ -241,7 +239,7 @@ namespace SolarPaygo.Api.Controllers
                 return Unauthorized();
             }
 
-            var system = await _context.SolarSystems.FindAsync(systemId);
+            var system = await _context.SolarSystems.Include(s => s.PricePlan).FirstOrDefaultAsync(s => s.Id == systemId);
             if (system == null) return NotFound();
 
             // Sync this specific system
@@ -275,6 +273,7 @@ namespace SolarPaygo.Api.Controllers
             public string CustomerAddress { get; set; } = "Lagos, Nigeria";
             public string CustomerGender { get; set; } = ""; // Gender will be selected by user/admin
             public string GeneratorCapacity { get; set; } = "2KV"; // e.g. 1KV, 2KV, 3KV, 5KV, 10KV
+            public int? PricePlanId { get; set; } // optional — null means legacy/standard pricing
 
             // Support snake_case/Squad-style names if sent directly
             public string? customer_identifier { get; set; }
@@ -339,6 +338,13 @@ namespace SolarPaygo.Api.Controllers
             if (existing != null)
                 return Ok(existing);
 
+            if (request.PricePlanId.HasValue)
+            {
+                bool planExists = await _context.PricePlans.AnyAsync(p => p.Id == request.PricePlanId.Value);
+                if (!planExists)
+                    return BadRequest("Price plan not found.");
+            }
+
             // Generate dedicated Squad Virtual Account for bank transfer payments
             _logger.LogInformation("[Register] Registering customer and generating Squad virtual account for {OwnerName}", request.OwnerName);
             
@@ -394,7 +400,8 @@ namespace SolarPaygo.Api.Controllers
                 CumulativeKwhBought = 0.0M,
                 CumulativeKwhConsumed = 0m,
                 LastSyncTime = DateTime.UtcNow,
-                LastSyncKwh = 0m
+                LastSyncKwh = 0m,
+                PricePlanId = request.PricePlanId
             };
 
             _context.SolarSystems.Add(newSystem);

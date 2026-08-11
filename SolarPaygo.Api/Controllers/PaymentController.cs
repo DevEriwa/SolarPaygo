@@ -236,9 +236,9 @@ namespace SolarPaygo.Api.Controllers
             }
 
             // Find matching Solar System
-            var system = await _context.SolarSystems.FirstOrDefaultAsync(s => 
-                s.VirtualAccountNumber == virtualAccountNumber || 
-                s.HardwareId == customerIdentifier || 
+            var system = await _context.SolarSystems.Include(s => s.PricePlan).FirstOrDefaultAsync(s =>
+                s.VirtualAccountNumber == virtualAccountNumber ||
+                s.HardwareId == customerIdentifier ||
                 s.StronMeterId == customerIdentifier);
 
             if (system == null)
@@ -253,23 +253,35 @@ namespace SolarPaygo.Api.Controllers
                 return (false, "Configuration error: No meter ID is linked to this solar system. Please contact your administrator to complete the setup before making a payment.", null, null);
             }
 
-            // Calculate billing rate based on pricing model (₦2,500/kWh base, ₦1,250/kWh if > 500 kWh used)
-            decimal rate = system.CumulativeKwhConsumed >= 500 ? 1250m : 2500m;
-            
-            // Add paid amount to customer balance
+            // Calculate billing rate based on the system's assigned price plan (falls back to
+            // legacy hardcoded pricing when unassigned — see PricingEngine).
+            decimal rate = PricingEngine.ResolveRate(system);
+
+            // Feeds the daily hybrid-billing/relay-lock subsystem (DashboardController/
+            // TelemetrySyncService) — unrelated to vending, left completely unchanged.
             system.PrepaidNairaBalance += amountPaid;
 
-            // Minimum top-up threshold: ₦250 (which equals 0.1 kWh at ₦2,500/kWh rate)
-            // If accumulated balance is less than ₦250, credit balance and wait for next top-up
-            if (system.PrepaidNairaBalance < 250m)
+            // Vend-only pool: naira paid but not yet converted into units. Kept separate from
+            // PrepaidNairaBalance so repeated payments don't re-vend off the full historical total.
+            system.PendingWalletBalance += amountPaid;
+
+            // Minimum top-up threshold to generate a token: 0.1 kWh worth of naira at this
+            // customer's actual resolved rate. For unassigned/legacy customers (rate = ₦2,500)
+            // this is exactly ₦250, preserving the original behavior byte-for-byte.
+            decimal minimumThreshold = 0.1m * rate;
+
+            // If the pending wallet hasn't reached the minimum threshold yet, hold it and wait
+            // for the next top-up — no token is generated.
+            if (system.PendingWalletBalance < minimumThreshold)
             {
-                _logger.LogInformation("[ProcessPayment] Payment of ₦{Amount} added to balance for account {Acc}. Total balance: ₦{Bal} (below ₦250 minimum token threshold).", amountPaid, virtualAccountNumber, system.PrepaidNairaBalance);
+                _logger.LogInformation("[ProcessPayment] Payment of ₦{Amount} added to pending wallet for account {Acc}. Pending wallet: ₦{Wallet} (below ₦{Threshold:N2} minimum token threshold at this rate).", amountPaid, virtualAccountNumber, system.PendingWalletBalance, minimumThreshold);
                 await _context.SaveChangesAsync();
-                return (true, $"Payment of ₦{amountPaid:N2} added to balance. Total balance is ₦{system.PrepaidNairaBalance:N2}. Minimum ₦250 required to generate a 0.1 kWh token.", null, system);
+                return (true, $"Payment of ₦{amountPaid:N2} added to your wallet. Pending wallet balance is ₦{system.PendingWalletBalance:N2}. Minimum ₦{minimumThreshold:N2} required to generate a 0.1 kWh token at your current rate.", null, system);
             }
 
-            // Calculate units to vend for the available balance in exact 0.1 kWh steps
-            decimal unitsToReceive = Math.Round(system.PrepaidNairaBalance / rate, 1, MidpointRounding.AwayFromZero);
+            // Calculate units to vend for the pending wallet only — never the full historical
+            // PrepaidNairaBalance — in exact 0.1 kWh steps.
+            decimal unitsToReceive = Math.Round(system.PendingWalletBalance / rate, 1, MidpointRounding.AwayFromZero);
             if (unitsToReceive < 0.1m) unitsToReceive = 0.1m;
 
             // Call Stron API to generate a real STS vending token
@@ -310,6 +322,14 @@ namespace SolarPaygo.Api.Controllers
             // Update system units
             system.AvailableUnits += actualUnitsVended;
             system.CumulativeKwhBought += actualUnitsVended; // Track total units ever purchased
+
+            // Deduct exactly what was converted from the pending wallet, leaving any true
+            // remainder (e.g. a payment that doesn't divide evenly into 0.1 kWh steps) intact
+            // for next time. actualUnitsVended (not unitsToReceive) is used because the vending
+            // API can return a slightly different unit count than requested. Clamp to zero to
+            // absorb a few kobo of rounding drift — expected, not a bug.
+            system.PendingWalletBalance -= actualUnitsVended * rate;
+            if (system.PendingWalletBalance < 0m) system.PendingWalletBalance = 0m;
 
             // 2. Automatically set system Active and close relay (Turn ON power) when balance/units > 0
             if (system.AvailableUnits > 0 || system.PrepaidNairaBalance > 0)

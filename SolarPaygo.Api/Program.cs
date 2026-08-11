@@ -3,7 +3,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using SolarPaygo.Api.Data;
+using SolarPaygo.Api.Models;
 using SolarPaygo.Api.Services;
+using System.Linq;
 using System.Text;
 using System.IO;
 
@@ -161,11 +163,79 @@ using (var scope = app.Services.CreateScope())
             BEGIN
                 ALTER TABLE SolarSystems ADD GeneratorCapacity NVARCHAR(50) NOT NULL DEFAULT '2KV';
             END
+
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'PricePlans')
+            BEGIN
+                CREATE TABLE PricePlans (
+                    Id INT IDENTITY(1,1) PRIMARY KEY,
+                    Band NVARCHAR(10) NOT NULL,
+                    Name NVARCHAR(100) NOT NULL,
+                    PricePerKwh DECIMAL(18, 2) NOT NULL,
+                    LoyaltyDiscountEnabled BIT NOT NULL DEFAULT 0,
+                    LoyaltyThresholdKwh DECIMAL(18, 2) NOT NULL DEFAULT 500,
+                    LoyaltyDiscountPercent DECIMAL(18, 2) NOT NULL DEFAULT 50,
+                    TimeFloorProtectionEnabled BIT NOT NULL DEFAULT 0,
+                    TimeFloorRatePerHour DECIMAL(18, 2) NOT NULL DEFAULT 313,
+                    TimeFloorMinimumKwh DECIMAL(18, 2) NOT NULL DEFAULT 0.3,
+                    CreatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+                    UpdatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+                );
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('SolarSystems') AND name = 'PricePlanId')
+            BEGIN
+                ALTER TABLE SolarSystems ADD PricePlanId INT NULL;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('PricePlans') AND name = 'LoyaltyThresholdKwh')
+            BEGIN
+                ALTER TABLE PricePlans ADD LoyaltyThresholdKwh DECIMAL(18, 2) NOT NULL DEFAULT 500;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('PricePlans') AND name = 'LoyaltyDiscountPercent')
+            BEGIN
+                ALTER TABLE PricePlans ADD LoyaltyDiscountPercent DECIMAL(18, 2) NOT NULL DEFAULT 50;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('PricePlans') AND name = 'TimeFloorRatePerHour')
+            BEGIN
+                ALTER TABLE PricePlans ADD TimeFloorRatePerHour DECIMAL(18, 2) NOT NULL DEFAULT 313;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('PricePlans') AND name = 'TimeFloorMinimumKwh')
+            BEGIN
+                ALTER TABLE PricePlans ADD TimeFloorMinimumKwh DECIMAL(18, 2) NOT NULL DEFAULT 0.3;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('SolarSystems') AND name = 'PendingWalletBalance')
+            BEGIN
+                ALTER TABLE SolarSystems ADD PendingWalletBalance DECIMAL(18, 2) NOT NULL DEFAULT 0.0;
+            END
         ");
     }
     catch (Exception ex)
     {
         Console.WriteLine("[DB Update] Error applying DB column updates: " + ex.Message);
+    }
+
+    // Seed the 3 fixed price bands (A/B/C) if none exist yet.
+    // This never touches any SolarSystem row — PricePlanId stays null (legacy pricing)
+    // for every existing customer until an admin explicitly assigns a band.
+    try
+    {
+        if (!db.PricePlans.Any())
+        {
+            db.PricePlans.AddRange(
+                new PricePlan { Band = "A", Name = "Band A", PricePerKwh = 2500m, LoyaltyDiscountEnabled = true, TimeFloorProtectionEnabled = true },
+                new PricePlan { Band = "B", Name = "Band B", PricePerKwh = 2500m, LoyaltyDiscountEnabled = false, TimeFloorProtectionEnabled = true },
+                new PricePlan { Band = "C", Name = "Band C", PricePerKwh = 2500m, LoyaltyDiscountEnabled = false, TimeFloorProtectionEnabled = false }
+            );
+            db.SaveChanges();
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine("[DB Seed] Error seeding price plans: " + ex.Message);
     }
 }
 

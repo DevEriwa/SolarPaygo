@@ -19,8 +19,15 @@ export default function PaymentPortal({ systems, systemsLoading, refreshData }) 
   }, [systems, systemsLoading, selectedSystemId]);
 
   const selectedSystem = systems.find(s => s.id.toString() === selectedSystemId);
-  const isDiscounted = selectedSystem && selectedSystem.cumulativeKwhConsumed >= 500;
-  const currentRate = isDiscounted ? 1250 : 2500;
+  const selectedPlan = selectedSystem?.pricePlan;
+  const isDiscounted = selectedSystem
+    ? (selectedPlan
+        ? (selectedPlan.loyaltyDiscountEnabled && selectedSystem.cumulativeKwhConsumed >= selectedPlan.loyaltyThresholdKwh)
+        : selectedSystem.cumulativeKwhConsumed >= 500)
+    : false;
+  const currentRate = selectedPlan
+    ? (isDiscounted ? selectedPlan.pricePerKwh * (1 - selectedPlan.loyaltyDiscountPercent / 100) : selectedPlan.pricePerKwh)
+    : (isDiscounted ? 1250 : 2500);
 
   const handleSimulateTransfer = async (e) => {
     e.preventDefault();
@@ -85,16 +92,12 @@ export default function PaymentPortal({ systems, systemsLoading, refreshData }) 
             </h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '0.9rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--border-color)' }}>
-                <span style={{ color: 'var(--text-muted)' }}>Base Rate:</span>
-                <span style={{ fontWeight: 'bold' }}>₦2,500 / kWh</span>
+                <span style={{ color: 'var(--text-muted)' }}>Pricing Model:</span>
+                <span style={{ fontWeight: 'bold' }}>Per-kWh, by assigned price band</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--border-color)' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Loyalty Discount (Tier 2):</span>
-                <span style={{ color: 'var(--success)', fontWeight: 'bold' }}>₦1,250 / kWh (50% Off)</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--border-color)' }}>
-                <span style={{ color: 'var(--text-muted)' }}>Discount Condition:</span>
-                <span style={{ color: 'var(--success)' }}>After 500 kWh of total use</span>
+                <span style={{ color: 'var(--success)' }}>50% off, once enabled and 500 kWh total use is reached — depends on band</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--border-color)' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Maximum Power Output:</span>
@@ -102,9 +105,12 @@ export default function PaymentPortal({ systems, systemsLoading, refreshData }) 
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Time Floor Protection:</span>
-                <span style={{ color: 'var(--warning)', fontWeight: '500' }}>0.3 kWh OR ₦313/hr minimum</span>
+                <span style={{ color: 'var(--warning)', fontWeight: '500' }}>0.3 kWh OR ₦313/hr minimum — depends on band</span>
               </div>
             </div>
+            <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '12px' }}>
+              See "Effective Rate" below for the exact rate applicable to the selected customer.
+            </p>
           </div>
 
           {/* VIRTUAL ACCOUNT CARD */}
@@ -140,7 +146,7 @@ export default function PaymentPortal({ systems, systemsLoading, refreshData }) 
                 <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border-color)', paddingTop: '12px', marginTop: '12px' }}>
                   <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Effective Rate:</span>
                   <span style={{ color: isDiscounted ? 'var(--success)' : 'var(--primary-accent)', fontWeight: 'bold' }}>
-                    {isDiscounted ? '₦1,250/kWh (Loyalty)' : '₦2,500/kWh (Standard)'}
+                    ₦{currentRate.toFixed(0)}/kWh {isDiscounted ? '(Loyalty)' : selectedPlan ? `(${selectedPlan.name || 'Band ' + selectedPlan.band})` : '(Standard)'}
                   </span>
                 </div>
               </div>

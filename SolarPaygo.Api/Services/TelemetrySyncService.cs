@@ -73,6 +73,7 @@ namespace SolarPaygo.Api.Services
 
                 // Select systems that are Active or Locked (skip Disabled systems to prevent unnecessary network requests)
                 var systems = await db.SolarSystems
+                    .Include(s => s.PricePlan)
                     .Where(s => s.Status == "Active" || s.Status == "Locked")
                     .ToListAsync(cancellationToken);
 
@@ -152,12 +153,8 @@ namespace SolarPaygo.Api.Services
                                 sys.AvailableUnits -= kwhUsed;
                                 if (sys.AvailableUnits < 0) sys.AvailableUnits = 0;
 
-                                decimal rate = sys.CumulativeKwhConsumed >= 500m ? 1250m : 2500m;
-                                decimal energyCharge = sys.DailyKwhConsumed * rate;
-                                decimal timeCharge = sys.DailyTimeActiveHours * 313m;
-                                decimal minimumDailyCharge = 0.3m * rate;
-
-                                decimal targetDailyCharge = Math.Max(minimumDailyCharge, Math.Max(energyCharge, timeCharge));
+                                decimal rate = PricingEngine.ResolveRate(sys);
+                                decimal targetDailyCharge = PricingEngine.ComputeTargetDailyCharge(sys, rate);
                                 decimal amountToDeduct = targetDailyCharge - sys.DailyAmountCharged;
 
                                 if (amountToDeduct > 0)

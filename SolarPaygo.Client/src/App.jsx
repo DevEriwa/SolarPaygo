@@ -8,6 +8,7 @@ import { BASE_URL } from './config';
 
 import Dashboard from './pages/Dashboard';
 import PaymentPortal from './pages/PaymentPortal';
+import SettingsPage from './pages/Settings';
 import Login from './pages/Login';
 import CustomerDashboard from './pages/customer/CustomerDashboard';
 
@@ -52,6 +53,26 @@ function AppContent() {
     },
     enabled: !!token && role === 'Admin',
     refetchInterval: 10000,
+  });
+
+  // Fetch the 3 fixed price bands (shared by Settings and Dashboard band-assignment UI)
+  const { data: pricePlans, refetch: refreshPricePlans } = useQuery({
+    queryKey: ['pricePlans'],
+    queryFn: async () => {
+      const t = localStorage.getItem('token');
+      if (!t) throw new Error('No token');
+      const response = await fetch(`${BASE_URL}/priceplan`, {
+        headers: { 'Authorization': `Bearer ${t}` }
+      });
+      if (response.ok) {
+        return response.json();
+      } else if (response.status === 401) {
+        handleLogout();
+        throw new Error('Unauthorized');
+      }
+      throw new Error('Network response was not ok');
+    },
+    enabled: !!token && role === 'Admin',
   });
 
   const handleLogout = () => {
@@ -114,6 +135,7 @@ function AppContent() {
                 dashboardData={dashboardData}
                 loading={dataLoading}
                 refreshData={refreshData}
+                pricePlans={pricePlans || []}
               />
             } />
             <Route path="/payments" element={
@@ -124,10 +146,10 @@ function AppContent() {
               />
             } />
             <Route path="/settings" element={
-              <div className="glass-panel">
-                <h2>Settings</h2>
-                <p style={{color: 'var(--text-muted)', marginTop: '10px'}}>System configuration coming soon.</p>
-              </div>
+              <SettingsPage
+                pricePlans={pricePlans || []}
+                refreshPricePlans={refreshPricePlans}
+              />
             } />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>

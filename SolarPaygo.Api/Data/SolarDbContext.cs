@@ -12,10 +12,18 @@ namespace SolarPaygo.Api.Data
         public DbSet<SolarSystem> SolarSystems { get; set; }
         public DbSet<UsageLog> UsageLogs { get; set; }
         public DbSet<Transaction> Transactions { get; set; }
+        public DbSet<PricePlan> PricePlans { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
+
+            modelBuilder.Entity<SolarSystem>()
+                .HasOne(s => s.PricePlan)
+                .WithMany()
+                .HasForeignKey(s => s.PricePlanId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .IsRequired(false);
         }
     }
 }
