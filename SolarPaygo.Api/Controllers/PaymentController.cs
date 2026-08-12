@@ -319,7 +319,7 @@ namespace SolarPaygo.Api.Controllers
             // PrepaidNairaBalance so repeated payments don't re-vend off the full historical total.
             system.PendingWalletBalance += amountPaid;
 
-            var vendOutcome = await TryVendFromWalletAsync(system, reference);
+            var vendOutcome = await TryVendFromWalletAsync(system, reference, amountPaidThisTransaction: amountPaid);
 
             if (vendOutcome.Outcome == WalletVendOutcome.VendingServiceUnavailable)
             {
@@ -405,7 +405,12 @@ namespace SolarPaygo.Api.Controllers
         // amount from the wallet, activate the relay if appropriate. Does NOT call
         // SaveChangesAsync — callers decide when to persist (e.g. ProcessPaymentInternal must
         // discard everything, including the new-payment balance additions, if Stron is unreachable).
-        private async Task<WalletVendResult> TryVendFromWalletAsync(SolarSystem system, string reference)
+        // amountPaidThisTransaction: for a normal payment-triggered vend, pass the actual naira
+        // amount just paid so the Transaction record reflects what the customer really paid this
+        // time. For a wallet redemption (no new payment), leave null — the Transaction then
+        // records the naira value actually converted from the existing wallet instead, so history
+        // reads meaningfully rather than showing ₦0.
+        private async Task<WalletVendResult> TryVendFromWalletAsync(SolarSystem system, string reference, decimal? amountPaidThisTransaction = null)
         {
             // Calculate billing rate based on the system's assigned price plan (falls back to
             // legacy hardcoded pricing when unassigned — see PricingEngine).
@@ -472,13 +477,11 @@ namespace SolarPaygo.Api.Controllers
                 _logger.LogWarning("[VendFromWallet] OTA Token transmission did not confirm for meter {MeterId}. Token is still sent via Email/SMS for keypad entry.", system.StronMeterId);
             }
 
-            // Update database records. AmountPaid reflects the naira value actually converted
-            // this time (not a new payment) so transaction history reads meaningfully for a
-            // wallet redemption too, rather than showing ₦0.
+            // Update database records.
             var transaction = new Transaction
             {
                 SolarSystemId = system.Id,
-                AmountPaid = actualUnitsVended * rate,
+                AmountPaid = amountPaidThisTransaction ?? (actualUnitsVended * rate),
                 UnitsAdded = actualUnitsVended,
                 Status = "Completed",
                 StsToken = stsToken,
