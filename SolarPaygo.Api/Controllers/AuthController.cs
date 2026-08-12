@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
@@ -78,6 +79,7 @@ namespace SolarPaygo.Api.Controllers
             return new JwtSecurityTokenHandler().WriteToken(token);
         }
 
+        [Authorize(Roles = "Admin")]
         [HttpGet("debug/customer/{email}")]
         public async Task<IActionResult> DebugCustomer(string email)
         {

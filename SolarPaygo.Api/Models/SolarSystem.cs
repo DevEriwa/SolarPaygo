@@ -54,5 +54,10 @@ namespace SolarPaygo.Api.Models
         // existing billing behavior for any customer not explicitly assigned a band.
         public int? PricePlanId { get; set; }
         public PricePlan? PricePlan { get; set; }
+
+        // True once a low-balance alert email has been sent for the CURRENT low-balance
+        // episode. Reset to false once the balance recovers, so the next dip sends a fresh
+        // alert instead of staying silent forever or re-sending every poll cycle.
+        public bool LowBalanceNotified { get; set; } = false;
     }
 }
