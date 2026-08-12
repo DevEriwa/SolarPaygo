@@ -7,7 +7,6 @@ using SolarPaygo.Api.Models;
 using SolarPaygo.Api.Services;
 using System.Linq;
 using System.Text;
-using System.IO;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -59,6 +58,7 @@ builder.Services.AddScoped<IStronVendingService, StronVendingService>();
 builder.Services.AddScoped<ISmsService, LoggingSmsService>();
 builder.Services.AddHostedService<DailyBillingResetService>();
 builder.Services.AddHostedService<TelemetrySyncService>();
+builder.Services.AddHostedService<LowBalanceMonitorService>();
 
 builder.Services.AddSignalR();
 
@@ -135,22 +135,21 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<SolarDbContext>();
-    if (app.Environment.IsDevelopment())
-    {
-        // One‑time DB reset: check for marker file
-        var markerPath = Path.Combine(AppContext.BaseDirectory, "db_reset_done.marker");
-        if (!File.Exists(markerPath))
-        {
-            // Delete all tables & data
-            db.Database.EnsureDeleted();
-            // Create marker to prevent future resets
-            File.WriteAllText(markerPath, "Database reset completed at " + DateTime.UtcNow);
-        }
-    }
-    // Ensure schema exists (creates tables if missing)
+
+    // EnsureCreated() is a no-op on any database that already exists (local, UAT, production) —
+    // it only creates a schema from scratch when the database doesn't exist at all yet, and does
+    // NOT detect or apply incremental changes to an existing database. That job belongs entirely
+    // to the idempotent ALTER TABLE/CREATE TABLE block below.
     db.Database.EnsureCreated();
 
-    // Auto-migrate schema updates safely
+    // Auto-migrate schema updates safely.
+    //
+    // NOTE ON MIGRATIONS: the files under Migrations/ are generated via `dotnet ef migrations add`
+    // for historical record-keeping and EF model-snapshot diffing only. `Database.Migrate()` is
+    // never called anywhere in this app, and no environment's database has EF migrations actually
+    // applied to it — this block is the real, ongoing mechanism that evolves the schema. Do NOT run
+    // `dotnet ef database update` against any environment's database: it will attempt to re-create
+    // tables that already exist and fail.
     try
     {
         db.Database.ExecuteSqlRaw(@"
@@ -210,6 +209,11 @@ using (var scope = app.Services.CreateScope())
             IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('SolarSystems') AND name = 'PendingWalletBalance')
             BEGIN
                 ALTER TABLE SolarSystems ADD PendingWalletBalance DECIMAL(18, 2) NOT NULL DEFAULT 0.0;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('SolarSystems') AND name = 'LowBalanceNotified')
+            BEGIN
+                ALTER TABLE SolarSystems ADD LowBalanceNotified BIT NOT NULL DEFAULT 0;
             END
         ");
     }
