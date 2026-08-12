@@ -9,6 +9,8 @@ export default function CustomerDashboard() {
   const [simulateAmount, setSimulateAmount] = useState('');
   const [simulateLoading, setSimulateLoading] = useState(false);
   const [simulateMessage, setSimulateMessage] = useState(null);
+  const [redeemLoading, setRedeemLoading] = useState(false);
+  const [redeemResult, setRedeemResult] = useState(null);
 
   const token = localStorage.getItem('token');
 
@@ -66,6 +68,28 @@ export default function CustomerDashboard() {
       }
     };
   }, [data?.system?.hardwareId, refetch]);
+
+  const handleRedeemWallet = async () => {
+    setRedeemLoading(true);
+    setRedeemResult(null);
+    try {
+      const response = await fetch(`${BASE_URL}/payment/redeem-wallet`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setRedeemResult({ type: data.redeemed ? 'success' : 'info', text: data.message });
+        if (data.redeemed) refetch();
+      } else {
+        setRedeemResult({ type: 'error', text: data.message || 'Failed to redeem wallet balance.' });
+      }
+    } catch {
+      setRedeemResult({ type: 'error', text: 'Network error while redeeming wallet balance.' });
+    } finally {
+      setRedeemLoading(false);
+    }
+  };
 
   const handleCopy = (text) => {
     navigator.clipboard.writeText(text);
@@ -181,10 +205,26 @@ export default function CustomerDashboard() {
           </div>
         </div>
       </div>
-      <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '-16px', marginBottom: '24px' }}>
-        <Coins size={12} style={{ verticalAlign: 'middle', marginRight: '4px' }} />
-        Pending Wallet is money you've paid that hasn't converted into an energy token yet — it converts automatically once it reaches the minimum for your rate.
-      </p>
+      <div style={{ marginTop: '-16px', marginBottom: '24px' }}>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginBottom: '10px' }}>
+          <Coins size={12} style={{ verticalAlign: 'middle', marginRight: '4px' }} />
+          Pending Wallet is money you've paid that hasn't converted into an energy token yet — it converts automatically once it reaches the minimum for your rate, or you can redeem it now below.
+        </p>
+        <button
+          onClick={handleRedeemWallet}
+          disabled={redeemLoading || !system.pendingWalletBalance}
+          style={{ padding: '8px 14px', borderRadius: '6px', background: 'rgba(250, 204, 21, 0.12)', color: '#facc15', border: '1px solid rgba(250, 204, 21, 0.4)', fontSize: '0.85rem', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+        >
+          <Coins size={14} /> {redeemLoading ? 'Redeeming...' : 'Redeem Wallet Balance'}
+        </button>
+        {redeemResult && (
+          <div style={{ marginTop: '10px', padding: '10px', borderRadius: '6px', fontSize: '0.85rem',
+            background: redeemResult.type === 'success' ? 'rgba(34, 197, 94, 0.1)' : redeemResult.type === 'error' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(255,255,255,0.05)',
+            color: redeemResult.type === 'success' ? 'var(--success)' : redeemResult.type === 'error' ? 'var(--danger)' : 'var(--text-muted)' }}>
+            {redeemResult.text}
+          </div>
+        )}
+      </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginTop: '24px' }}>
         {/* Payment / Virtual Account Info */}

@@ -101,7 +101,11 @@ export default function PaymentPortal({ systems, systemsLoading, refreshData }) 
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--border-color)' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Maximum Power Output:</span>
-                <span style={{ fontWeight: 'bold' }}>300W – 400W</span>
+                <span style={{ fontWeight: 'bold' }}>
+                  {selectedSystem && selectedSystem.maxLoadWatts
+                    ? `${(selectedSystem.maxLoadWatts * 0.9).toFixed(0)}W (90% of ${selectedSystem.generatorCapacity || 'generator'} capacity)`
+                    : '90% of generator capacity'}
+                </span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Time Floor Protection:</span>

@@ -111,6 +111,11 @@ namespace SolarPaygo.Api.Services
                         sys.Power = status.Power;
                         sys.CoverState = status.CoverState;
 
+                        // Trust the meter's own reported remaining balance directly instead of
+                        // computing it locally — keeps the displayed "remaining kWh" in sync with
+                        // the physical meter (including immediately after a Clear Credit reset).
+                        sys.AvailableUnits = status.ResidualAmount;
+
                         // Align MaxLoadWatts
                         if (!string.IsNullOrWhiteSpace(sys.GeneratorCapacity))
                         {
@@ -150,8 +155,7 @@ namespace SolarPaygo.Api.Services
                                 sys.DailyKwhConsumed += kwhUsed;
                                 sys.DailyTimeActiveHours += (decimal)hoursElapsed;
                                 sys.CumulativeKwhConsumed += kwhUsed;
-                                sys.AvailableUnits -= kwhUsed;
-                                if (sys.AvailableUnits < 0) sys.AvailableUnits = 0;
+                                // AvailableUnits is now set directly from status.ResidualAmount above.
 
                                 decimal rate = PricingEngine.ResolveRate(sys);
                                 decimal targetDailyCharge = PricingEngine.ComputeTargetDailyCharge(sys, rate);

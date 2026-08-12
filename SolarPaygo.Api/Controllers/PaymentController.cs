@@ -213,12 +213,70 @@ namespace SolarPaygo.Api.Controllers
             return BadRequest(result.Message);
         }
 
+        // 4. Customer self-service: convert whatever is currently in their pending wallet into a
+        // token right now, instead of waiting for a new payment to push it over the threshold.
+        [Authorize(Roles = "Customer")]
+        [HttpPost("redeem-wallet")]
+        public async Task<IActionResult> RedeemWallet()
+        {
+            var systemIdClaim = User.Claims.FirstOrDefault(c => c.Type == "SystemId")?.Value;
+            if (string.IsNullOrEmpty(systemIdClaim) || !int.TryParse(systemIdClaim, out int systemId))
+            {
+                return Unauthorized();
+            }
+
+            var system = await _context.SolarSystems.Include(s => s.PricePlan).FirstOrDefaultAsync(s => s.Id == systemId);
+            if (system == null) return NotFound("Solar system not found.");
+
+            if (string.IsNullOrWhiteSpace(system.StronMeterId))
+            {
+                return BadRequest(new { message = "No meter is linked to your account yet. Please contact your administrator." });
+            }
+
+            string reference = "REF_REDEEM_" + DateTime.UtcNow.ToString("yyyyMMddHHmmss") + "_" + new Random().Next(1000, 9999);
+            var outcome = await TryVendFromWalletAsync(system, reference);
+
+            if (outcome.Outcome == WalletVendOutcome.VendingServiceUnavailable)
+            {
+                return BadRequest(new { message = "Your wallet balance is preserved, but the meter vending server is temporarily unavailable. Please try again in a few minutes." });
+            }
+
+            if (outcome.Outcome == WalletVendOutcome.InsufficientBalance)
+            {
+                decimal shortfall = outcome.MinimumThreshold - outcome.WalletBalance;
+                return Ok(new
+                {
+                    redeemed = false,
+                    walletBalance = outcome.WalletBalance,
+                    minimumThreshold = outcome.MinimumThreshold,
+                    amountNeeded = shortfall,
+                    message = $"You need ₦{shortfall:N2} more to redeem your wallet balance at your current rate (₦{outcome.MinimumThreshold:N2} minimum for a 0.1 kWh token)."
+                });
+            }
+
+            // Vended — real-time dashboard update, same as a normal payment.
+            try
+            {
+                await _hubContext.Clients.Group(system.HardwareId).SendAsync("ReceiveSystemUpdate");
+            }
+            catch (Exception ex) { _logger.LogError(ex, "Failed to broadcast SignalR update."); }
+
+            return Ok(new
+            {
+                redeemed = true,
+                token = outcome.StsToken,
+                unitsAdded = outcome.UnitsVended,
+                walletBalance = outcome.WalletBalance,
+                message = $"Wallet balance redeemed for {outcome.UnitsVended:F2} kWh."
+            });
+        }
+
         // --- INTERNAL LOGIC ---
 
         private async Task<(bool Success, string Message, Transaction? Transaction, SolarSystem? System)> ProcessPaymentInternal(
-            string virtualAccountNumber, 
-            string customerIdentifier, 
-            string amountStr, 
+            string virtualAccountNumber,
+            string customerIdentifier,
+            string amountStr,
             string reference)
         {
             if (!decimal.TryParse(amountStr, out var amountPaid) || amountPaid <= 0)
@@ -253,10 +311,6 @@ namespace SolarPaygo.Api.Controllers
                 return (false, "Configuration error: No meter ID is linked to this solar system. Please contact your administrator to complete the setup before making a payment.", null, null);
             }
 
-            // Calculate billing rate based on the system's assigned price plan (falls back to
-            // legacy hardcoded pricing when unassigned — see PricingEngine).
-            decimal rate = PricingEngine.ResolveRate(system);
-
             // Feeds the daily hybrid-billing/relay-lock subsystem (DashboardController/
             // TelemetrySyncService) — unrelated to vending, left completely unchanged.
             system.PrepaidNairaBalance += amountPaid;
@@ -265,86 +319,28 @@ namespace SolarPaygo.Api.Controllers
             // PrepaidNairaBalance so repeated payments don't re-vend off the full historical total.
             system.PendingWalletBalance += amountPaid;
 
-            // Minimum top-up threshold to generate a token: 0.1 kWh worth of naira at this
-            // customer's actual resolved rate. For unassigned/legacy customers (rate = ₦2,500)
-            // this is exactly ₦250, preserving the original behavior byte-for-byte.
-            decimal minimumThreshold = 0.1m * rate;
+            var vendOutcome = await TryVendFromWalletAsync(system, reference);
 
-            // If the pending wallet hasn't reached the minimum threshold yet, hold it and wait
-            // for the next top-up — no token is generated.
-            if (system.PendingWalletBalance < minimumThreshold)
+            if (vendOutcome.Outcome == WalletVendOutcome.VendingServiceUnavailable)
             {
-                _logger.LogInformation("[ProcessPayment] Payment of ₦{Amount} added to pending wallet for account {Acc}. Pending wallet: ₦{Wallet} (below ₦{Threshold:N2} minimum token threshold at this rate).", amountPaid, virtualAccountNumber, system.PendingWalletBalance, minimumThreshold);
-                await _context.SaveChangesAsync();
-                return (true, $"Payment of ₦{amountPaid:N2} added to your wallet. Pending wallet balance is ₦{system.PendingWalletBalance:N2}. Minimum ₦{minimumThreshold:N2} required to generate a 0.1 kWh token at your current rate.", null, system);
-            }
-
-            // Calculate units to vend for the pending wallet only — never the full historical
-            // PrepaidNairaBalance — in exact 0.1 kWh steps.
-            decimal unitsToReceive = Math.Round(system.PendingWalletBalance / rate, 1, MidpointRounding.AwayFromZero);
-            if (unitsToReceive < 0.1m) unitsToReceive = 0.1m;
-
-            // Call Stron API to generate a real STS vending token
-            var vendResult = await _vendingService.GenerateVendingTokenAsync(system.StronMeterId, unitsToReceive, isVendByUnit: true);
-            if (vendResult == null)
-            {
+                // Do NOT save — discards the balance additions above too, matching the original
+                // "balance preserved" behavior: the customer's payment simply hasn't been recorded
+                // yet and the webhook/caller is expected to retry.
                 _logger.LogError("[ProcessPayment] Stron API returned no token for meter {MeterId}. Aborting transaction — balance preserved.", system.StronMeterId);
                 return (false, "Payment could not be completed: The meter vending server is temporarily unavailable. Your account balance is preserved. Please try again in a few minutes or contact support.", null, null);
             }
 
-            string stsToken = vendResult.Token;
-            decimal actualUnitsVended = vendResult.Units > 0 ? vendResult.Units : unitsToReceive;
-
-            // 1. Transmit generated STS token directly to the physical meter over the air (GPRS/OTA)
-            _logger.LogInformation("[ProcessPayment] Transmitting STS token {Token} ({Units} kWh) OTA to physical meter {MeterId}...", stsToken, actualUnitsVended, system.StronMeterId);
-            bool otaSuccess = await _vendingService.SendTokenRemotelyAsync(system.StronMeterId, stsToken);
-            if (otaSuccess)
+            if (vendOutcome.Outcome == WalletVendOutcome.InsufficientBalance)
             {
-                _logger.LogInformation("[ProcessPayment] OTA Token transmission SUCCESSFUL for meter {MeterId}", system.StronMeterId);
-            }
-            else
-            {
-                _logger.LogWarning("[ProcessPayment] OTA Token transmission did not confirm for meter {MeterId}. Token is still sent via Email/SMS for keypad entry.", system.StronMeterId);
+                _logger.LogInformation("[ProcessPayment] Payment of ₦{Amount} added to pending wallet for account {Acc}. Pending wallet: ₦{Wallet} (below ₦{Threshold:N2} minimum token threshold at this rate).", amountPaid, virtualAccountNumber, vendOutcome.WalletBalance, vendOutcome.MinimumThreshold);
+                await _context.SaveChangesAsync();
+                return (true, $"Payment of ₦{amountPaid:N2} added to your wallet. Pending wallet balance is ₦{vendOutcome.WalletBalance:N2}. Minimum ₦{vendOutcome.MinimumThreshold:N2} required to generate a 0.1 kWh token at your current rate.", null, system);
             }
 
-            // Update database records
-            var transaction = new Transaction
-            {
-                SolarSystemId = system.Id,
-                AmountPaid = amountPaid,
-                UnitsAdded = actualUnitsVended,
-                Status = "Completed",
-                StsToken = stsToken,
-                PaymentReference = reference,
-                TransactionDate = DateTime.UtcNow
-            };
-
-            // Update system units
-            system.AvailableUnits += actualUnitsVended;
-            system.CumulativeKwhBought += actualUnitsVended; // Track total units ever purchased
-
-            // Deduct exactly what was converted from the pending wallet, leaving any true
-            // remainder (e.g. a payment that doesn't divide evenly into 0.1 kWh steps) intact
-            // for next time. actualUnitsVended (not unitsToReceive) is used because the vending
-            // API can return a slightly different unit count than requested. Clamp to zero to
-            // absorb a few kobo of rounding drift — expected, not a bug.
-            system.PendingWalletBalance -= actualUnitsVended * rate;
-            if (system.PendingWalletBalance < 0m) system.PendingWalletBalance = 0m;
-
-            // 2. Automatically set system Active and close relay (Turn ON power) when balance/units > 0
-            if (system.AvailableUnits > 0 || system.PrepaidNairaBalance > 0)
-            {
-                system.Status = "Active";
-                system.RelayState = "1";
-                if (!string.IsNullOrWhiteSpace(system.StronMeterId))
-                {
-                    _logger.LogInformation("[ProcessPayment] Sending Remote Switch ON command to meter {MeterId}...", system.StronMeterId);
-                    await _vendingService.SetRemoteSwitchAsync(system.StronMeterId, turnOn: true);
-                }
-            }
-
-            _context.Transactions.Add(transaction);
-            await _context.SaveChangesAsync();
+            // Vended successfully.
+            var transaction = vendOutcome.Transaction!;
+            string stsToken = vendOutcome.StsToken!;
+            decimal actualUnitsVended = vendOutcome.UnitsVended;
 
             _logger.LogInformation($"[ProcessPayment] Completed payment: {amountPaid} Naira. Generated STS Token: {stsToken}. Added {actualUnitsVended} kWh.");
 
@@ -381,6 +377,152 @@ namespace SolarPaygo.Api.Controllers
             catch (Exception ex) { _logger.LogError(ex, "Failed to broadcast SignalR update."); }
 
             return (true, "Success", transaction, system);
+        }
+
+        private enum WalletVendOutcome
+        {
+            InsufficientBalance,
+            VendingServiceUnavailable,
+            Vended
+        }
+
+        private class WalletVendResult
+        {
+            public WalletVendOutcome Outcome { get; set; }
+            public decimal WalletBalance { get; set; }
+            public decimal MinimumThreshold { get; set; }
+            public decimal Rate { get; set; }
+            public Transaction? Transaction { get; set; }
+            public string? StsToken { get; set; }
+            public decimal UnitsVended { get; set; }
+        }
+
+        // Shared vend-from-wallet logic used by both ProcessPaymentInternal (triggered by a new
+        // payment) and the customer-facing redeem-wallet endpoint (triggered manually, no new
+        // payment). Converts as much of system.PendingWalletBalance as qualifies into a real STS
+        // token, mirroring exactly what a payment-triggered vend does: mint token, OTA send,
+        // create a Transaction, update AvailableUnits/CumulativeKwhBought, deduct the converted
+        // amount from the wallet, activate the relay if appropriate. Does NOT call
+        // SaveChangesAsync — callers decide when to persist (e.g. ProcessPaymentInternal must
+        // discard everything, including the new-payment balance additions, if Stron is unreachable).
+        private async Task<WalletVendResult> TryVendFromWalletAsync(SolarSystem system, string reference)
+        {
+            // Calculate billing rate based on the system's assigned price plan (falls back to
+            // legacy hardcoded pricing when unassigned — see PricingEngine).
+            decimal rate = PricingEngine.ResolveRate(system);
+
+            // Minimum top-up threshold to generate a token: 0.1 kWh worth of naira at this
+            // customer's actual resolved rate. For unassigned/legacy customers (rate = ₦2,500)
+            // this is exactly ₦250, preserving the original behavior byte-for-byte.
+            decimal minimumThreshold = 0.1m * rate;
+
+            if (system.PendingWalletBalance < minimumThreshold)
+            {
+                return new WalletVendResult
+                {
+                    Outcome = WalletVendOutcome.InsufficientBalance,
+                    WalletBalance = system.PendingWalletBalance,
+                    MinimumThreshold = minimumThreshold,
+                    Rate = rate
+                };
+            }
+
+            // Callers must have already validated a meter is linked — defensive guard here too.
+            if (string.IsNullOrWhiteSpace(system.StronMeterId))
+            {
+                return new WalletVendResult
+                {
+                    Outcome = WalletVendOutcome.VendingServiceUnavailable,
+                    WalletBalance = system.PendingWalletBalance,
+                    MinimumThreshold = minimumThreshold,
+                    Rate = rate
+                };
+            }
+
+            // Calculate units to vend for the pending wallet only — never the full historical
+            // PrepaidNairaBalance — in exact 0.1 kWh steps.
+            decimal unitsToReceive = Math.Round(system.PendingWalletBalance / rate, 1, MidpointRounding.AwayFromZero);
+            if (unitsToReceive < 0.1m) unitsToReceive = 0.1m;
+
+            // Call Stron API to generate a real STS vending token
+            var vendResult = await _vendingService.GenerateVendingTokenAsync(system.StronMeterId, unitsToReceive, isVendByUnit: true);
+            if (vendResult == null)
+            {
+                return new WalletVendResult
+                {
+                    Outcome = WalletVendOutcome.VendingServiceUnavailable,
+                    WalletBalance = system.PendingWalletBalance,
+                    MinimumThreshold = minimumThreshold,
+                    Rate = rate
+                };
+            }
+
+            string stsToken = vendResult.Token;
+            decimal actualUnitsVended = vendResult.Units > 0 ? vendResult.Units : unitsToReceive;
+
+            // 1. Transmit generated STS token directly to the physical meter over the air (GPRS/OTA)
+            _logger.LogInformation("[VendFromWallet] Transmitting STS token {Token} ({Units} kWh) OTA to physical meter {MeterId}...", stsToken, actualUnitsVended, system.StronMeterId);
+            bool otaSuccess = await _vendingService.SendTokenRemotelyAsync(system.StronMeterId, stsToken);
+            if (otaSuccess)
+            {
+                _logger.LogInformation("[VendFromWallet] OTA Token transmission SUCCESSFUL for meter {MeterId}", system.StronMeterId);
+            }
+            else
+            {
+                _logger.LogWarning("[VendFromWallet] OTA Token transmission did not confirm for meter {MeterId}. Token is still sent via Email/SMS for keypad entry.", system.StronMeterId);
+            }
+
+            // Update database records. AmountPaid reflects the naira value actually converted
+            // this time (not a new payment) so transaction history reads meaningfully for a
+            // wallet redemption too, rather than showing ₦0.
+            var transaction = new Transaction
+            {
+                SolarSystemId = system.Id,
+                AmountPaid = actualUnitsVended * rate,
+                UnitsAdded = actualUnitsVended,
+                Status = "Completed",
+                StsToken = stsToken,
+                PaymentReference = reference,
+                TransactionDate = DateTime.UtcNow
+            };
+
+            // Update system units
+            system.AvailableUnits += actualUnitsVended;
+            system.CumulativeKwhBought += actualUnitsVended; // Track total units ever purchased
+
+            // Deduct exactly what was converted from the pending wallet, leaving any true
+            // remainder (e.g. a payment that doesn't divide evenly into 0.1 kWh steps) intact
+            // for next time. actualUnitsVended (not unitsToReceive) is used because the vending
+            // API can return a slightly different unit count than requested. Clamp to zero to
+            // absorb a few kobo of rounding drift — expected, not a bug.
+            system.PendingWalletBalance -= actualUnitsVended * rate;
+            if (system.PendingWalletBalance < 0m) system.PendingWalletBalance = 0m;
+
+            // 2. Automatically set system Active and close relay (Turn ON power) when balance/units > 0
+            if (system.AvailableUnits > 0 || system.PrepaidNairaBalance > 0)
+            {
+                system.Status = "Active";
+                system.RelayState = "1";
+                if (!string.IsNullOrWhiteSpace(system.StronMeterId))
+                {
+                    _logger.LogInformation("[VendFromWallet] Sending Remote Switch ON command to meter {MeterId}...", system.StronMeterId);
+                    await _vendingService.SetRemoteSwitchAsync(system.StronMeterId, turnOn: true);
+                }
+            }
+
+            _context.Transactions.Add(transaction);
+            await _context.SaveChangesAsync();
+
+            return new WalletVendResult
+            {
+                Outcome = WalletVendOutcome.Vended,
+                WalletBalance = system.PendingWalletBalance,
+                MinimumThreshold = minimumThreshold,
+                Rate = rate,
+                Transaction = transaction,
+                StsToken = stsToken,
+                UnitsVended = actualUnitsVended
+            };
         }
 
         // --- SIGNATURE HELPER METHODS ---

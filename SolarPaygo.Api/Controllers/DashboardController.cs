@@ -110,6 +110,11 @@ namespace SolarPaygo.Api.Controllers
             sys.Power = status.Power;
             sys.CoverState = status.CoverState;
 
+            // Trust the meter's own reported remaining balance directly instead of computing it
+            // locally — keeps the displayed "remaining kWh" in sync with the physical meter
+            // (including immediately after a Clear Credit reset).
+            sys.AvailableUnits = status.ResidualAmount;
+
             // Ensure MaxLoadWatts aligns with declared GeneratorCapacity (e.g., 2KV => 2000W)
             if (!string.IsNullOrWhiteSpace(sys.GeneratorCapacity))
             {
@@ -154,10 +159,7 @@ namespace SolarPaygo.Api.Controllers
                     sys.DailyKwhConsumed += kwhUsed;
                     sys.DailyTimeActiveHours += (decimal)hoursElapsed;
                     sys.CumulativeKwhConsumed += kwhUsed;
-
-                    // Deduct actual kWh from available units
-                    sys.AvailableUnits -= kwhUsed;
-                    if (sys.AvailableUnits < 0) sys.AvailableUnits = 0;
+                    // AvailableUnits is now set directly from status.ResidualAmount above.
 
                     // Rate/billing floor resolved via PricingEngine — uses the system's assigned
                     // price plan if any, otherwise falls back to legacy hardcoded pricing.
