@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Zap, Save, CheckCircle2, Plus, Trash2, X } from 'lucide-react';
+import { Zap, Save, CheckCircle2, Plus, Trash2, X, Pencil } from 'lucide-react';
 import { BASE_URL } from '../config';
 
 const fieldStyle = { width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.9rem' };
@@ -11,15 +11,17 @@ function LoyaltyAndFloorFields({
   loyaltyDiscountPercent, setLoyaltyDiscountPercent,
   timeFloorProtectionEnabled, setTimeFloorProtectionEnabled,
   timeFloorRatePerHour, setTimeFloorRatePerHour,
-  timeFloorMinimumKwh, setTimeFloorMinimumKwh
+  timeFloorMinimumKwh, setTimeFloorMinimumKwh,
+  disabled = false
 }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '20px' }}>
       <div>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', color: 'var(--text-main, white)', cursor: 'pointer' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', color: 'var(--text-main, white)', cursor: disabled ? 'default' : 'pointer' }}>
           <input
             type="checkbox"
             checked={loyaltyDiscountEnabled}
+            disabled={disabled}
             onChange={(e) => setLoyaltyDiscountEnabled(e.target.checked)}
           />
           Loyalty Discount (Tier 2)
@@ -28,21 +30,22 @@ function LoyaltyAndFloorFields({
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '8px', paddingLeft: '4px' }}>
             <div>
               <label style={subFieldLabel}>Threshold (kWh)</label>
-              <input type="number" min="0" step="1" value={loyaltyThresholdKwh} onChange={(e) => setLoyaltyThresholdKwh(e.target.value)} style={fieldStyle} />
+              <input type="number" min="0" step="1" disabled={disabled} value={loyaltyThresholdKwh} onChange={(e) => setLoyaltyThresholdKwh(e.target.value)} style={fieldStyle} />
             </div>
             <div>
               <label style={subFieldLabel}>Discount (%)</label>
-              <input type="number" min="0" max="100" step="1" value={loyaltyDiscountPercent} onChange={(e) => setLoyaltyDiscountPercent(e.target.value)} style={fieldStyle} />
+              <input type="number" min="0" max="100" step="1" disabled={disabled} value={loyaltyDiscountPercent} onChange={(e) => setLoyaltyDiscountPercent(e.target.value)} style={fieldStyle} />
             </div>
           </div>
         )}
       </div>
 
       <div>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', color: 'var(--text-main, white)', cursor: 'pointer' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', color: 'var(--text-main, white)', cursor: disabled ? 'default' : 'pointer' }}>
           <input
             type="checkbox"
             checked={timeFloorProtectionEnabled}
+            disabled={disabled}
             onChange={(e) => setTimeFloorProtectionEnabled(e.target.checked)}
           />
           Time Floor Protection
@@ -51,11 +54,11 @@ function LoyaltyAndFloorFields({
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '8px', paddingLeft: '4px' }}>
             <div>
               <label style={subFieldLabel}>Rate per hour (₦)</label>
-              <input type="number" min="0" step="1" value={timeFloorRatePerHour} onChange={(e) => setTimeFloorRatePerHour(e.target.value)} style={fieldStyle} />
+              <input type="number" min="0" step="1" disabled={disabled} value={timeFloorRatePerHour} onChange={(e) => setTimeFloorRatePerHour(e.target.value)} style={fieldStyle} />
             </div>
             <div>
               <label style={subFieldLabel}>Minimum kWh floor</label>
-              <input type="number" min="0" step="0.1" value={timeFloorMinimumKwh} onChange={(e) => setTimeFloorMinimumKwh(e.target.value)} style={fieldStyle} />
+              <input type="number" min="0" step="0.1" disabled={disabled} value={timeFloorMinimumKwh} onChange={(e) => setTimeFloorMinimumKwh(e.target.value)} style={fieldStyle} />
             </div>
           </div>
         )}
@@ -86,6 +89,23 @@ function PlanCard({ plan, onSaved, onDeleted }) {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState(null);
   const [saved, setSaved] = useState(false);
+  // Cards open read-only so a live tariff can't be changed by accident -
+  // the admin must explicitly click Edit first (mirrors the Delete affordance).
+  const [editing, setEditing] = useState(false);
+
+  // Restore the last-saved values and drop out of edit mode.
+  const handleCancelEdit = () => {
+    setName(plan.name);
+    setPricePerKwh(plan.pricePerKwh);
+    setLoyaltyDiscountEnabled(plan.loyaltyDiscountEnabled);
+    setLoyaltyThresholdKwh(plan.loyaltyThresholdKwh);
+    setLoyaltyDiscountPercent(plan.loyaltyDiscountPercent);
+    setTimeFloorProtectionEnabled(plan.timeFloorProtectionEnabled);
+    setTimeFloorRatePerHour(plan.timeFloorRatePerHour);
+    setTimeFloorMinimumKwh(plan.timeFloorMinimumKwh);
+    setError(null);
+    setEditing(false);
+  };
 
   const buildBody = () => ({
     name,
@@ -115,6 +135,7 @@ function PlanCard({ plan, onSaved, onDeleted }) {
 
       if (response.ok) {
         setSaved(true);
+        setEditing(false);
         if (onSaved) onSaved();
         setTimeout(() => setSaved(false), 2000);
       } else {
@@ -164,14 +185,24 @@ function PlanCard({ plan, onSaved, onDeleted }) {
           <Zap color="var(--primary-accent)" size={20} />
           <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 'bold' }}>{plan.name}</span>
         </div>
-        <button
-          onClick={handleDelete}
-          disabled={saving || deleting}
-          title="Delete plan"
-          style={{ background: 'transparent', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: '4px', display: 'flex' }}
-        >
-          <Trash2 size={16} />
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+          <button
+            onClick={() => (editing ? handleCancelEdit() : setEditing(true))}
+            disabled={saving || deleting}
+            title={editing ? 'Cancel editing' : 'Edit plan'}
+            style={{ background: 'transparent', border: 'none', color: editing ? 'var(--text-muted)' : 'var(--primary-accent)', cursor: 'pointer', padding: '4px', display: 'flex' }}
+          >
+            {editing ? <X size={16} /> : <Pencil size={16} />}
+          </button>
+          <button
+            onClick={handleDelete}
+            disabled={saving || deleting}
+            title="Delete plan"
+            style={{ background: 'transparent', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: '4px', display: 'flex' }}
+          >
+            <Trash2 size={16} />
+          </button>
+        </div>
       </div>
 
       <div style={{ marginBottom: '16px' }}>
@@ -179,6 +210,7 @@ function PlanCard({ plan, onSaved, onDeleted }) {
         <input
           type="text"
           value={name}
+          disabled={!editing}
           onChange={(e) => setName(e.target.value)}
           style={fieldStyle}
         />
@@ -191,6 +223,7 @@ function PlanCard({ plan, onSaved, onDeleted }) {
           min="0"
           step="0.01"
           value={pricePerKwh}
+          disabled={!editing}
           onChange={(e) => setPricePerKwh(e.target.value)}
           style={{ ...fieldStyle, padding: '10px 12px', fontSize: '1rem' }}
         />
@@ -203,6 +236,7 @@ function PlanCard({ plan, onSaved, onDeleted }) {
         timeFloorProtectionEnabled={timeFloorProtectionEnabled} setTimeFloorProtectionEnabled={setTimeFloorProtectionEnabled}
         timeFloorRatePerHour={timeFloorRatePerHour} setTimeFloorRatePerHour={setTimeFloorRatePerHour}
         timeFloorMinimumKwh={timeFloorMinimumKwh} setTimeFloorMinimumKwh={setTimeFloorMinimumKwh}
+        disabled={!editing}
       />
 
       {error && (
@@ -211,19 +245,48 @@ function PlanCard({ plan, onSaved, onDeleted }) {
         </div>
       )}
 
-      <button
-        onClick={handleSave}
-        disabled={saving || deleting}
-        className="action-btn"
-        style={{
-          width: '100%', padding: '10px', flexDirection: 'row', gap: '8px', justifyContent: 'center',
-          background: saved ? 'var(--success)' : 'var(--primary-accent)',
-          color: 'var(--bg-dark)',
-          borderColor: saved ? 'var(--success)' : 'var(--primary-accent)'
-        }}
-      >
-        {saving ? 'Saving...' : saved ? (<><CheckCircle2 size={16} /> Saved</>) : (<><Save size={16} /> Save Plan</>)}
-      </button>
+      {editing ? (
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            onClick={handleCancelEdit}
+            disabled={saving || deleting}
+            className="action-btn"
+            style={{
+              padding: '10px 14px', flexDirection: 'row', gap: '6px', justifyContent: 'center',
+              background: 'transparent', color: 'var(--text-muted)', borderColor: 'var(--border-color)'
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving || deleting}
+            className="action-btn"
+            style={{
+              flex: 1, padding: '10px', flexDirection: 'row', gap: '8px', justifyContent: 'center',
+              background: 'var(--primary-accent)',
+              color: 'var(--bg-dark)',
+              borderColor: 'var(--primary-accent)'
+            }}
+          >
+            {saving ? 'Saving...' : (<><Save size={16} /> Save Plan</>)}
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={() => setEditing(true)}
+          disabled={saving || deleting}
+          className="action-btn"
+          style={{
+            width: '100%', padding: '10px', flexDirection: 'row', gap: '8px', justifyContent: 'center',
+            background: saved ? 'var(--success)' : 'transparent',
+            color: saved ? 'var(--bg-dark)' : 'var(--primary-accent)',
+            borderColor: saved ? 'var(--success)' : 'var(--primary-accent)'
+          }}
+        >
+          {saved ? (<><CheckCircle2 size={16} /> Saved</>) : (<><Pencil size={16} /> Edit Plan</>)}
+        </button>
+      )}
     </div>
   );
 }

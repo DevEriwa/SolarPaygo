@@ -14,15 +14,31 @@ import CustomerDashboard from './pages/customer/CustomerDashboard';
 
 const queryClient = new QueryClient();
 
+// The role claim key varies depending on the backend framework standard.
+// Returns null for a missing or undecodable token - the effect below is what
+// actually logs the user out in that case.
+function decodeRoleFromToken(token) {
+  if (!token) return null;
+  try {
+    const decoded = jwtDecode(token);
+    return decoded.role || decoded['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'] || null;
+  } catch {
+    return null;
+  }
+}
+
 function AppContent() {
   const [token, setToken] = useState(localStorage.getItem('token'));
-  const [role, setRole] = useState(null);
+  // Decoded synchronously on first render. Previously this started as null and was
+  // only populated by the effect below, so on a page refresh every admin query
+  // (which is gated on role === 'Admin') stayed disabled for that first render and
+  // the dashboard could sit on "Loading..." instead of fetching.
+  const [role, setRole] = useState(() => decodeRoleFromToken(localStorage.getItem('token')));
 
   useEffect(() => {
     if (token) {
       try {
         const decoded = jwtDecode(token);
-        // The role claim key varies depending on the backend framework standard
         const userRole = decoded.role || decoded['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'];
         setRole(userRole);
       } catch (err) {

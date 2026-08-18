@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Lock, Unlock, MinusCircle, CreditCard, Plus, Activity, User, ShieldAlert, BadgeCheck, Phone, Mail, FileText } from 'lucide-react';
+import { Lock, Unlock, MinusCircle, CreditCard, Plus, Activity, User, ShieldAlert, BadgeCheck, Phone, Mail, FileText, Coins } from 'lucide-react';
 import { BASE_URL } from '../config';
 
 export default function Dashboard({ dashboardData, loading, refreshData, pricePlans = [] }) {
@@ -409,6 +409,13 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                       <div style={{ fontSize: '1.05rem', fontWeight: 'bold', color: sys.prepaidNairaBalance > 0 ? 'var(--success)' : 'var(--danger)' }}>
                         {formatNaira(sys.prepaidNairaBalance)}
                       </div>
+                      {/* Pending Wallet - mirrors what the customer sees on their dashboard */}
+                      <div
+                        title="Money paid that hasn't converted into an energy token yet"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginTop: '5px', color: sys.pendingWalletBalance > 0 ? '#facc15' : 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 600 }}
+                      >
+                        <Coins size={12} /> Wallet: {formatNaira(sys.pendingWalletBalance)}
+                      </div>
                       {/* Tariff Label */}
                       <div style={{ marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
                         {plan && (
@@ -728,6 +735,13 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                         <td>
                           <div style={{ fontSize: '1.05rem', fontWeight: 'bold', color: sys.prepaidNairaBalance > 0 ? 'var(--success)' : 'var(--danger)' }}>
                             {formatNaira(sys.prepaidNairaBalance)}
+                          </div>
+                          {/* Pending Wallet - mirrors what the customer sees on their dashboard */}
+                          <div
+                            title="Money paid that hasn't converted into an energy token yet"
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginTop: '5px', color: sys.pendingWalletBalance > 0 ? '#facc15' : 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 600 }}
+                          >
+                            <Coins size={12} /> Wallet: {formatNaira(sys.pendingWalletBalance)}
                           </div>
                           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
                             {sys.availableUnits?.toFixed(2)} kWh energy left
