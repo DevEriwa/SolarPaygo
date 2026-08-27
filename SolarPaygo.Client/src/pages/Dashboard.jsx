@@ -21,6 +21,53 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
   const [regGender, setRegGender] = useState('');
   const [regDob, setRegDob] = useState('');
   const [regGeneratorCapacity, setRegGeneratorCapacity] = useState('2KV');
+
+  // The sizes admins can now manage. Seeded with exactly the list this form has always
+  // shown, so if the request fails - or an older API is deployed - the form still offers
+  // every option it did before rather than an empty dropdown nobody can register through.
+  const FALLBACK_CAPACITIES = [
+    { code: '1KV', name: 'Small (Residential, 1 room)' },
+    { code: '2KV', name: 'Medium (Standard Household)' },
+    { code: '3KV', name: 'Large (Small Business / Shop)' },
+    { code: '5KV', name: 'Extra Large (Commercial)' },
+    { code: '7.5KV', name: 'Heavy Duty' },
+    { code: '10KV', name: 'Industrial' },
+  ];
+  const [capacities, setCapacities] = useState(FALLBACK_CAPACITIES);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${BASE_URL}/generatorcapacity`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!response.ok) return;
+
+        const data = await response.json();
+        // Only take over from the fallback when there is actually something to show.
+        // An empty list would leave the form unusable, and the built-in sizes are a
+        // better answer than none.
+        if (!cancelled && Array.isArray(data) && data.length > 0) {
+          setCapacities(data);
+
+          // The form defaults to 2KV. If an admin has retired that size it would no
+          // longer be in the list, leaving the picker showing nothing and submitting an
+          // empty capacity - so fall to whatever the first offered size is.
+          setRegGeneratorCapacity(prev =>
+            data.some(c => c.code === prev) ? prev : data[0].code
+          );
+        }
+      } catch {
+        // Keeps the built-in list. Registration is more important than the list being
+        // current, so this failing must not stop anyone registering a generator.
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, []);
   const [regPricePlanId, setRegPricePlanId] = useState('');
   const [regError, setRegError] = useState(null);
   const [regSuccess, setRegSuccess] = useState(false);
@@ -898,12 +945,9 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
               <div>
                 <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>⚡ Generator Capacity</label>
                 <select required value={regGeneratorCapacity} onChange={(e) => setRegGeneratorCapacity(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }}>
-                  <option value="1KV">1KV – Small (Residential, 1 room)</option>
-                  <option value="2KV">2KV – Medium (Standard Household)</option>
-                  <option value="3KV">3KV – Large (Small Business / Shop)</option>
-                  <option value="5KV">5KV – Extra Large (Commercial)</option>
-                  <option value="7.5KV">7.5KV – Heavy Duty</option>
-                  <option value="10KV">10KV – Industrial</option>
+                  {capacities.map(c => (
+                    <option key={c.id ?? c.code} value={c.code}>{c.code} – {c.name}</option>
+                  ))}
                 </select>
                 <span style={{ fontSize: '0.7rem', color: 'var(--warning)', marginTop: '4px', display: 'block' }}>⚠️ Load must not exceed 90% of this capacity or the relay will automatically trip off.</span>
               </div>

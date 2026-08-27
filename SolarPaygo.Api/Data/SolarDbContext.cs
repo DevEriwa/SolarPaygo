@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using SolarPaygo.Api.Models;
 
 namespace SolarPaygo.Api.Data
@@ -13,6 +13,7 @@ namespace SolarPaygo.Api.Data
         public DbSet<UsageLog> UsageLogs { get; set; }
         public DbSet<Transaction> Transactions { get; set; }
         public DbSet<PricePlan> PricePlans { get; set; }
+        public DbSet<GeneratorCapacity> GeneratorCapacities { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
