@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authentication.JwtBearer;
+﻿using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -215,6 +215,20 @@ using (var scope = app.Services.CreateScope())
             BEGIN
                 ALTER TABLE SolarSystems ADD LowBalanceNotified BIT NOT NULL DEFAULT 0;
             END
+
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'GeneratorCapacities')
+            BEGIN
+                CREATE TABLE GeneratorCapacities (
+                    Id INT IDENTITY(1,1) PRIMARY KEY,
+                    Code NVARCHAR(50) NOT NULL,
+                    Name NVARCHAR(200) NOT NULL,
+                    Watts INT NOT NULL,
+                    IsActive BIT NOT NULL DEFAULT 1,
+                    DisplayOrder INT NOT NULL DEFAULT 0,
+                    CreatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+                    UpdatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+                );
+            END
         ");
     }
     catch (Exception ex)
@@ -240,6 +254,30 @@ using (var scope = app.Services.CreateScope())
     catch (Exception ex)
     {
         Console.WriteLine("[DB Seed] Error seeding price plans: " + ex.Message);
+    }
+
+    // Seed exactly the sizes the registration form already offered, so the picker looks
+    // identical the first time this runs and no existing customer's stored capacity string
+    // stops resolving. Watts are stated rather than parsed from the code: "7.5KV" read as
+    // digits gives 75, and a 75000W ceiling is a relay that never trips.
+    try
+    {
+        if (!db.GeneratorCapacities.Any())
+        {
+            db.GeneratorCapacities.AddRange(
+                new GeneratorCapacity { Code = "1KV",   Name = "Small (Residential, 1 room)",  Watts = 1000,  DisplayOrder = 1 },
+                new GeneratorCapacity { Code = "2KV",   Name = "Medium (Standard Household)",  Watts = 2000,  DisplayOrder = 2 },
+                new GeneratorCapacity { Code = "3KV",   Name = "Large (Small Business / Shop)", Watts = 3000, DisplayOrder = 3 },
+                new GeneratorCapacity { Code = "5KV",   Name = "Extra Large (Commercial)",     Watts = 5000,  DisplayOrder = 4 },
+                new GeneratorCapacity { Code = "7.5KV", Name = "Heavy Duty",                   Watts = 7500,  DisplayOrder = 5 },
+                new GeneratorCapacity { Code = "10KV",  Name = "Industrial",                   Watts = 10000, DisplayOrder = 6 }
+            );
+            db.SaveChanges();
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine("[DB Seed] Error seeding generator capacities: " + ex.Message);
     }
 }
 

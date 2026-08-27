@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -118,8 +118,7 @@ namespace SolarPaygo.Api.Controllers
             // Ensure MaxLoadWatts aligns with declared GeneratorCapacity (e.g., 2KV => 2000W)
             if (!string.IsNullOrWhiteSpace(sys.GeneratorCapacity))
             {
-                int capacityKw = ParseCapacityKw(sys.GeneratorCapacity);
-                sys.MaxLoadWatts = capacityKw * 1000;
+                sys.MaxLoadWatts = ResolveMaxLoadWatts(sys.GeneratorCapacity);
             }
 
             // 2. Enforce Maximum Load Limit
@@ -395,7 +394,7 @@ namespace SolarPaygo.Api.Controllers
                 CustomerGender = request.CustomerGender,
                 GeneratorCapacity = !string.IsNullOrWhiteSpace(request.GeneratorCapacity) ? request.GeneratorCapacity : "2KV",
                 // Derive MaxLoadWatts from GeneratorCapacity (KV -> Watts)
-                MaxLoadWatts = (int)(ParseCapacityKw(request.GeneratorCapacity) * 1000),
+                MaxLoadWatts = ResolveMaxLoadWatts(request.GeneratorCapacity),
                 Status = "Locked", // New systems always start locked until customer makes first payment
                 AvailableUnits = 0.0M,      // ₦0 balance — no free credit
                 PrepaidNairaBalance = 0.0M, // ₦0 balance — no free credit
@@ -574,6 +573,30 @@ namespace SolarPaygo.Api.Controllers
         }
 
         // Helper to parse numeric kW from a string like "2KV".
+        /// <summary>
+        /// The load ceiling in watts for a stored capacity code.
+        ///
+        /// Prefers the managed capacity list, where the figure is stated rather than inferred.
+        /// Reading digits out of a code only works while every code is a whole number of KV:
+        /// "7.5KV" reduces to 75, and therefore to a 75000W ceiling instead of 7500W - ten
+        /// times too high, which is a relay that never trips. The parser stays as the fallback
+        /// for any code with no matching row.
+        /// </summary>
+        private int ResolveMaxLoadWatts(string capacity)
+        {
+            if (string.IsNullOrWhiteSpace(capacity))
+                return ParseCapacityKw(capacity) * 1000;
+
+            var match = _context.GeneratorCapacities
+                .AsNoTracking()
+                .FirstOrDefault(c => c.Code == capacity);
+
+            if (match != null && match.Watts > 0)
+                return match.Watts;
+
+            return ParseCapacityKw(capacity) * 1000;
+        }
+
         private static int ParseCapacityKw(string capacity)
         {
             if (string.IsNullOrWhiteSpace(capacity))
