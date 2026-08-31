@@ -868,7 +868,10 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                                         <tr style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-color)' }}>
                                           <th style={{ padding: '8px' }}>Date</th>
                                           <th style={{ padding: '8px' }}>Amount Paid</th>
+                                          <th style={{ padding: '8px' }}>Used Amount</th>
                                           <th style={{ padding: '8px' }}>Units Credited</th>
+                                          <th style={{ padding: '8px' }}>Added to Wallet</th>
+                                          <th style={{ padding: '8px' }}>Wallet Total</th>
                                           <th style={{ padding: '8px' }}>Generated STS Token</th>
                                         </tr>
                                       </thead>
@@ -877,7 +880,19 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                                           <tr key={tx.id || idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
                                             <td style={{ padding: '8px', color: 'var(--text-muted)' }}>{new Date(tx.transactionDate).toLocaleString()}</td>
                                             <td style={{ padding: '8px', fontWeight: 'bold', color: 'var(--success)' }}>{formatNaira(tx.amountPaid)}</td>
+                                            {/* A dash, not a zero, where the split was never recorded. Older
+                                                transactions predate it being kept, and showing 0 would read as
+                                                "none of this bought units", which is a different claim entirely. */}
+                                            <td style={{ padding: '8px', color: 'var(--text-muted)' }}>
+                                              {tx.usedAmount != null ? formatNaira(tx.usedAmount) : '—'}
+                                            </td>
                                             <td style={{ padding: '8px', color: 'white' }}>{tx.unitsAdded?.toFixed(2)} kWh</td>
+                                            <td style={{ padding: '8px', color: tx.addedToWallet ? 'var(--primary-accent)' : 'var(--text-muted)' }}>
+                                              {tx.addedToWallet != null ? formatNaira(tx.addedToWallet) : '—'}
+                                            </td>
+                                            <td style={{ padding: '8px', color: 'var(--text-muted)' }}>
+                                              {tx.walletBalanceAfter != null ? formatNaira(tx.walletBalanceAfter) : '—'}
+                                            </td>
                                             <td style={{ padding: '8px', fontFamily: 'monospace', color: 'var(--primary-accent)', fontWeight: 'bold' }}>{tx.stsToken || 'OTA Sent'}</td>
                                           </tr>
                                         ))}

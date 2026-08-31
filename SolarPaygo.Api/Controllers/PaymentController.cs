@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -477,12 +477,29 @@ namespace SolarPaygo.Api.Controllers
                 _logger.LogWarning("[VendFromWallet] OTA Token transmission did not confirm for meter {MeterId}. Token is still sent via Email/SMS for keypad entry.", system.StronMeterId);
             }
 
+            // What this payment actually bought, and what was left over. Worked out here, where
+            // the rate that applied is still in hand - after the wallet has been drawn down
+            // there is no way to recover it, and a later guess from the current rate would be
+            // wrong for anybody whose band has changed.
+            decimal amountPaidHere = amountPaidThisTransaction ?? (actualUnitsVended * rate);
+            decimal usedAmount = Math.Round(actualUnitsVended * rate, 2);
+            decimal walletAfter = Math.Max(0m, system.PendingWalletBalance - usedAmount);
+
+            // The share of this payment that stayed behind, never more than was paid: the
+            // wallet can carry a remainder from an earlier payment, and that older money is
+            // not something this transaction added.
+            decimal addedToWallet = Math.Round(Math.Max(0m, Math.Min(amountPaidHere, walletAfter)), 2);
+
             // Update database records.
             var transaction = new Transaction
             {
                 SolarSystemId = system.Id,
-                AmountPaid = amountPaidThisTransaction ?? (actualUnitsVended * rate),
+                AmountPaid = amountPaidHere,
                 UnitsAdded = actualUnitsVended,
+                UsedAmount = usedAmount,
+                AddedToWallet = addedToWallet,
+                WalletBalanceAfter = walletAfter,
+                RateAtTime = rate,
                 Status = "Completed",
                 StsToken = stsToken,
                 PaymentReference = reference,

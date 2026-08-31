@@ -216,6 +216,26 @@ using (var scope = app.Services.CreateScope())
                 ALTER TABLE SolarSystems ADD LowBalanceNotified BIT NOT NULL DEFAULT 0;
             END
 
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Transactions') AND name = 'UsedAmount')
+            BEGIN
+                ALTER TABLE Transactions ADD UsedAmount DECIMAL(18, 2) NULL;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Transactions') AND name = 'AddedToWallet')
+            BEGIN
+                ALTER TABLE Transactions ADD AddedToWallet DECIMAL(18, 2) NULL;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Transactions') AND name = 'WalletBalanceAfter')
+            BEGIN
+                ALTER TABLE Transactions ADD WalletBalanceAfter DECIMAL(18, 2) NULL;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Transactions') AND name = 'RateAtTime')
+            BEGIN
+                ALTER TABLE Transactions ADD RateAtTime DECIMAL(18, 2) NULL;
+            END
+
             IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'GeneratorCapacities')
             BEGIN
                 CREATE TABLE GeneratorCapacities (
