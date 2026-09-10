@@ -4,10 +4,37 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>solarpaygo-client</title>
+    <title>SolarPayGO - Meter Vending &amp; Virtual Accounts</title>
+    <meta name="description" content="STE18-G smart meter vending and squad virtual accounts - manage generator capacity and customers from one pay-as-you-go solar dashboard." />
+    <!-- Lets a shared link render as a real preview card - title, blurb and image - instead
+         of a bare URL wherever it's pasted (WhatsApp, Telegram, X, Slack...). -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="SolarPayGO" />
+    <meta property="og:title" content="SolarPayGO - Meter Vending &amp; Virtual Accounts" />
+    <meta property="og:description" content="STE18-G smart meter vending and squad virtual accounts - manage generator capacity and customers from one pay-as-you-go solar dashboard." />
+    <meta property="og:image" content="/images/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="SolarPayGO - Meter Vending &amp; Virtual Accounts" />
+    <meta name="twitter:description" content="STE18-G smart meter vending and squad virtual accounts - manage generator capacity and customers from one pay-as-you-go solar dashboard." />
+    <meta name="twitter:image" content="/images/og-image.png" />
+    <!-- Makes the site installable as an app - a home-screen icon, no browser chrome -
+         without a separate codebase or app-store review. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/images/icon-192.png" />
+    <meta name="theme-color" content="#121212" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="SolarPayGO" />
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => navigator.serviceWorker.register('/service-worker.js'));
+      }
+    </script>
   </body>
 </html>

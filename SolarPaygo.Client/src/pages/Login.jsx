@@ -37,7 +37,10 @@ export default function Login({ setAuthToken }) {
   return (
     <div className="login-container">
       <div className="login-panel">
-        <h2 style={{ textAlign: 'center', marginBottom: '8px', color: 'white' }}>SolarPaygo Login</h2>
+        <h2 style={{ textAlign: 'center', marginBottom: '8px', color: 'white' }}>SolarPayGO</h2>
+        <p style={{ textAlign: 'center', color: 'var(--text-muted)', marginBottom: '8px', fontSize: '0.9rem' }}>
+          STE18-G smart meter vending and squad virtual accounts.
+        </p>
         <p style={{ textAlign: 'center', color: 'var(--text-muted)', marginBottom: '32px', fontSize: '0.9rem' }}>
           Admins: Use your admin username and password.<br/>
           Customers: Use your Email and Hardware ID.
