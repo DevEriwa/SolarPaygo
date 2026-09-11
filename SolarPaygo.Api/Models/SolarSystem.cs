@@ -59,5 +59,9 @@ namespace SolarPaygo.Api.Models
         // episode. Reset to false once the balance recovers, so the next dip sends a fresh
         // alert instead of staying silent forever or re-sending every poll cycle.
         public bool LowBalanceNotified { get; set; } = false;
+
+        // Assigned Device Group/Tab. Null means Ungrouped / default view.
+        public int? DeviceGroupId { get; set; }
+        public DeviceGroup? DeviceGroup { get; set; }
     }
 }

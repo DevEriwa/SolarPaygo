@@ -42,7 +42,7 @@ namespace SolarPaygo.Api.Controllers
         [HttpGet("systems")]
         public async Task<IActionResult> GetDashboardSummary()
         {
-            var systems = await _context.SolarSystems.Include(s => s.PricePlan).ToListAsync();
+            var systems = await _context.SolarSystems.Include(s => s.PricePlan).Include(s => s.DeviceGroup).ToListAsync();
 
             // Calculate today's revenue
             var today = DateTime.UtcNow.Date;
@@ -83,6 +83,10 @@ namespace SolarPaygo.Api.Controllers
                     s.PricePlan.Id, s.PricePlan.Band, s.PricePlan.Name, s.PricePlan.PricePerKwh,
                     s.PricePlan.LoyaltyDiscountEnabled, s.PricePlan.LoyaltyThresholdKwh, s.PricePlan.LoyaltyDiscountPercent,
                     s.PricePlan.TimeFloorProtectionEnabled, s.PricePlan.TimeFloorRatePerHour, s.PricePlan.TimeFloorMinimumKwh
+                },
+                s.DeviceGroupId,
+                DeviceGroup = s.DeviceGroup == null ? null : new {
+                    s.DeviceGroup.Id, s.DeviceGroup.Name, s.DeviceGroup.Description, s.DeviceGroup.DisplayOrder, s.DeviceGroup.IsActive
                 },
                 MeterOnline = s.LastSyncTime.HasValue && (DateTime.UtcNow - s.LastSyncTime.Value).TotalMinutes < 15
             }).ToList();
@@ -275,6 +279,7 @@ namespace SolarPaygo.Api.Controllers
             public string CustomerGender { get; set; } = ""; // Gender will be selected by user/admin
             public string GeneratorCapacity { get; set; } = "2KV"; // e.g. 1KV, 2KV, 3KV, 5KV, 10KV
             public int? PricePlanId { get; set; } // optional — null means legacy/standard pricing
+            public int? DeviceGroupId { get; set; } // optional — null means Ungrouped
 
             // Support snake_case/Squad-style names if sent directly
             public string? customer_identifier { get; set; }
@@ -402,7 +407,8 @@ namespace SolarPaygo.Api.Controllers
                 CumulativeKwhConsumed = 0m,
                 LastSyncTime = DateTime.UtcNow,
                 LastSyncKwh = 0m,
-                PricePlanId = request.PricePlanId
+                PricePlanId = request.PricePlanId,
+                DeviceGroupId = request.DeviceGroupId
             };
 
             _context.SolarSystems.Add(newSystem);
@@ -585,16 +591,19 @@ namespace SolarPaygo.Api.Controllers
         private int ResolveMaxLoadWatts(string capacity)
         {
             if (string.IsNullOrWhiteSpace(capacity))
-                return ParseCapacityKw(capacity) * 1000;
+                return ParseCapacityKw(capacity) * 1000 * 90 / 100;
 
             var match = _context.GeneratorCapacities
                 .AsNoTracking()
                 .FirstOrDefault(c => c.Code == capacity);
 
             if (match != null && match.Watts > 0)
-                return match.Watts;
+            {
+                int pct = match.OverloadThresholdPercent > 0 ? match.OverloadThresholdPercent : 90;
+                return (int)Math.Round((double)match.Watts * pct / 100.0);
+            }
 
-            return ParseCapacityKw(capacity) * 1000;
+            return ParseCapacityKw(capacity) * 1000 * 90 / 100;
         }
 
         private static int ParseCapacityKw(string capacity)
@@ -612,6 +621,30 @@ namespace SolarPaygo.Api.Controllers
             if (string.IsNullOrWhiteSpace(fullName)) return "User";
             var parts = fullName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             return parts.Length > 1 ? parts[parts.Length - 1] : "User";
+        }
+
+        public class AssignGroupRequest
+        {
+            public int? DeviceGroupId { get; set; }
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpPost("systems/{id}/group")]
+        public async Task<IActionResult> AssignGroup(int id, [FromBody] AssignGroupRequest request)
+        {
+            var system = await _context.SolarSystems.FindAsync(id);
+            if (system == null) return NotFound("Solar system not found.");
+
+            if (request.DeviceGroupId.HasValue)
+            {
+                bool exists = await _context.DeviceGroups.AnyAsync(g => g.Id == request.DeviceGroupId.Value);
+                if (!exists) return BadRequest("Device group not found.");
+            }
+
+            system.DeviceGroupId = request.DeviceGroupId;
+            await _context.SaveChangesAsync();
+
+            return Ok(system);
         }
     }
 
