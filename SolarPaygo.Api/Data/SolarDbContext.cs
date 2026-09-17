@@ -15,6 +15,7 @@ namespace SolarPaygo.Api.Data
         public DbSet<PricePlan> PricePlans { get; set; }
         public DbSet<GeneratorCapacity> GeneratorCapacities { get; set; }
         public DbSet<AdminAccount> AdminAccounts { get; set; }
+        public DbSet<DeviceGroup> DeviceGroups { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -24,6 +25,13 @@ namespace SolarPaygo.Api.Data
                 .HasOne(s => s.PricePlan)
                 .WithMany()
                 .HasForeignKey(s => s.PricePlanId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .IsRequired(false);
+
+            modelBuilder.Entity<SolarSystem>()
+                .HasOne(s => s.DeviceGroup)
+                .WithMany()
+                .HasForeignKey(s => s.DeviceGroupId)
                 .OnDelete(DeleteBehavior.SetNull)
                 .IsRequired(false);
         }

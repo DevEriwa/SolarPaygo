@@ -248,6 +248,29 @@ using (var scope = app.Services.CreateScope())
                 );
             END
 
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'DeviceGroups')
+            BEGIN
+                CREATE TABLE DeviceGroups (
+                    Id INT IDENTITY(1,1) PRIMARY KEY,
+                    Name NVARCHAR(100) NOT NULL,
+                    Description NVARCHAR(500) NULL,
+                    DisplayOrder INT NOT NULL DEFAULT 0,
+                    IsActive BIT NOT NULL DEFAULT 1,
+                    CreatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+                    UpdatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+                );
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('SolarSystems') AND name = 'DeviceGroupId')
+            BEGIN
+                ALTER TABLE SolarSystems ADD DeviceGroupId INT NULL;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('GeneratorCapacities') AND name = 'OverloadThresholdPercent')
+            BEGIN
+                ALTER TABLE GeneratorCapacities ADD OverloadThresholdPercent INT NOT NULL DEFAULT 90;
+            END
+
             IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'GeneratorCapacities')
             BEGIN
                 CREATE TABLE GeneratorCapacities (
