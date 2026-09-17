@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Zap, Activity, Wallet, Coins, Copy, CheckCircle2, History } from 'lucide-react';
+import { Zap, Activity, Wallet, Coins, Copy, CheckCircle2, History, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 import { BASE_URL } from '../../config';
 import * as signalR from '@microsoft/signalr';
 
 export default function CustomerDashboard() {
   const [copied, setCopied] = useState(false);
+  // Simulate state kept in case it is needed again in future, but UI is hidden from production
   const [simulateAmount, setSimulateAmount] = useState('');
   const [simulateLoading, setSimulateLoading] = useState(false);
   const [simulateMessage, setSimulateMessage] = useState(null);
@@ -97,28 +98,26 @@ export default function CustomerDashboard() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // handleSimulatePayment kept for possible admin/debug use â€” not shown in UI
   const handleSimulatePayment = async (e) => {
     e.preventDefault();
     setSimulateLoading(true);
     setSimulateMessage(null);
 
     try {
-      // We will hit the existing generic buy-units endpoint with the customer's hardware ID
-      // Normally, this would be a webhook from Squad/Paystack. 
-      // For this test, we reuse the manual top-up endpoint.
       const response = await fetch(`${BASE_URL}/payment/buy-units`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          hardwareId: data.system.hardwareId, 
-          amountPaid: parseFloat(simulateAmount) 
+        body: JSON.stringify({
+          hardwareId: data.system.hardwareId,
+          amountPaid: parseFloat(simulateAmount)
         })
       });
 
       if (response.ok) {
-        setSimulateMessage({ type: 'success', text: `Payment of ₦${simulateAmount} simulated successfully!` });
+        setSimulateMessage({ type: 'success', text: `Payment of â‚¦${simulateAmount} simulated successfully!` });
         setSimulateAmount('');
-        refetch(); // Instantly update the dashboard
+        refetch();
       } else {
         setSimulateMessage({ type: 'error', text: 'Payment simulation failed.' });
       }
@@ -151,16 +150,43 @@ export default function CustomerDashboard() {
     return new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN' }).format(amount);
   };
 
-  const formatTime = (dateString) => {
-    return new Date(dateString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
+  // Status badge colours â€” mirrors the admin dashboard palette
+  const statusColor = system.status === 'Active' ? 'var(--success)'
+    : system.status === 'Locked' ? 'var(--danger)'
+    : 'var(--text-muted)';
+  const statusBg = system.status === 'Active' ? 'rgba(16,185,129,0.12)'
+    : system.status === 'Locked' ? 'rgba(239,68,68,0.12)'
+    : 'rgba(255,255,255,0.06)';
+  const StatusIcon = system.status === 'Active' ? CheckCircle
+    : system.status === 'Locked' ? XCircle
+    : AlertCircle;
 
   return (
     <div className="dashboard">
       <div className="dashboard-header">
         <div>
           <h1 className="page-title">My Solar System</h1>
-          <p className="subtitle">{system.hardwareId} • {system.status}</p>
+          <p className="subtitle">{system.hardwareId}</p>
+        </div>
+
+        {/* Active / Not Active status badge â€” read-only, mirrors admin view */}
+        <div style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '8px 18px',
+          borderRadius: '999px',
+          background: statusBg,
+          border: `1px solid ${statusColor}`,
+          color: statusColor,
+          fontWeight: 700,
+          fontSize: '0.9rem',
+          letterSpacing: '0.02em'
+        }}>
+          <StatusIcon size={16} />
+          {system.status === 'Active' ? 'Active'
+            : system.status === 'Locked' ? 'Not Active (Locked)'
+            : system.status}
         </div>
       </div>
 
@@ -208,7 +234,7 @@ export default function CustomerDashboard() {
       <div style={{ marginTop: '-16px', marginBottom: '24px' }}>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginBottom: '10px' }}>
           <Coins size={12} style={{ verticalAlign: 'middle', marginRight: '4px' }} />
-          Pending Wallet is money you've paid that hasn't converted into an energy token yet — it converts automatically once it reaches the minimum for your rate, or you can redeem it now below.
+          Pending Wallet is money you've paid that hasn't converted into an energy token yet â€” it converts automatically once it reaches the minimum for your rate, or you can redeem it now below.
         </p>
         <button
           onClick={handleRedeemWallet}
@@ -264,62 +290,87 @@ export default function CustomerDashboard() {
             </div>
           </div>
 
-          {/* Simulation Tools for Testing */}
+          {/* Simulation Tools â€” HIDDEN from customer-facing production view */}
+          {/* COMMENTED OUT: not shown to customers in live environment
           <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '20px' }}>
             <h3 style={{ fontSize: '1rem', color: 'var(--text-muted)', marginBottom: '12px' }}>Test / Simulate Transfer</h3>
             {simulateMessage && (
-              <div style={{ marginBottom: '12px', padding: '10px', borderRadius: '6px', background: simulateMessage.type === 'success' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)', color: simulateMessage.type === 'success' ? 'var(--success)' : 'var(--danger)', fontSize: '0.9rem' }}>
+              <div style={{ marginBottom: '12px', padding: '10px', borderRadius: '6px',
+                background: simulateMessage.type === 'success' ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
+                color: simulateMessage.type === 'success' ? 'var(--success)' : 'var(--danger)',
+                fontSize: '0.9rem' }}>
                 {simulateMessage.text}
               </div>
             )}
             <form onSubmit={handleSimulatePayment} style={{ display: 'flex', gap: '10px' }}>
-              <input 
-                type="number" 
-                placeholder="Amount (₦)"
-                value={simulateAmount}
-                onChange={(e) => setSimulateAmount(e.target.value)}
-                required
-                min="100"
-                style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white' }}
-              />
-              <button 
-                type="submit" 
-                disabled={simulateLoading}
-                style={{ padding: '10px 16px', borderRadius: '6px', background: 'var(--primary-accent)', color: 'var(--bg-dark)', fontWeight: 'bold', border: 'none', cursor: 'pointer' }}
-              >
+              <input type="number" placeholder="Amount (â‚¦)" value={simulateAmount}
+                onChange={(e) => setSimulateAmount(e.target.value)} required min="100"
+                style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white' }} />
+              <button type="submit" disabled={simulateLoading}
+                style={{ padding: '10px 16px', borderRadius: '6px', background: 'var(--primary-accent)', color: 'var(--bg-dark)', fontWeight: 'bold', border: 'none', cursor: 'pointer' }}>
                 {simulateLoading ? '...' : 'Simulate'}
               </button>
             </form>
           </div>
+          END COMMENTED OUT */}
         </div>
 
-        {/* Transaction History */}
+        {/* Transaction History â€” detailed view matching admin panel */}
         <div className="glass-panel">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
             <History size={20} color="var(--primary-accent)" />
             <h2 className="section-title" style={{ marginBottom: 0 }}>Transaction History</h2>
           </div>
           
-          <div style={{ overflowY: 'auto', maxHeight: '400px', paddingRight: '10px' }}>
+          <div style={{ overflowX: 'auto' }}>
             {recentTransactions?.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {recentTransactions.map((tx) => (
-                  <div key={tx.id} style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '16px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                      <div style={{ fontWeight: 600, color: 'white' }}>{formatNaira(tx.amountPaid)}</div>
-                      <div style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>{formatTime(tx.transactionDate)}</div>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ color: 'var(--primary-accent)', fontSize: '0.9rem', fontWeight: 500 }}>
-                        +{tx.unitsAdded.toFixed(2)} units
-                      </div>
-                      <div style={{ fontSize: '0.85rem', color: tx.status === 'Completed' ? 'var(--success)' : 'var(--text-muted)', background: tx.status === 'Completed' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '12px' }}>
-                        {tx.status}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', textAlign: 'left' }}>
+                <thead>
+                  <tr style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-color)' }}>
+                    <th style={{ padding: '8px 10px', fontWeight: 600 }}>Date</th>
+                    <th style={{ padding: '8px 10px', fontWeight: 600 }}>Amount Paid</th>
+                    <th style={{ padding: '8px 10px', fontWeight: 600 }}>Used Amount</th>
+                    <th style={{ padding: '8px 10px', fontWeight: 600 }}>Units Added</th>
+                    <th style={{ padding: '8px 10px', fontWeight: 600 }}>Added to Wallet</th>
+                    <th style={{ padding: '8px 10px', fontWeight: 600 }}>Wallet Total</th>
+                    <th style={{ padding: '8px 10px', fontWeight: 600 }}>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentTransactions.map((tx) => (
+                    <tr key={tx.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                      <td style={{ padding: '10px', color: 'var(--text-muted)' }}>
+                        {new Date(tx.transactionDate).toLocaleString()}
+                      </td>
+                      <td style={{ padding: '10px', fontWeight: 700, color: 'var(--success)' }}>
+                        {formatNaira(tx.amountPaid)}
+                      </td>
+                      {/* Older transactions may not have usedAmount â€” show a dash rather than misleading 0 */}
+                      <td style={{ padding: '10px', color: 'var(--text-muted)' }}>
+                        {tx.usedAmount != null ? formatNaira(tx.usedAmount) : 'â€”'}
+                      </td>
+                      <td style={{ padding: '10px', color: 'var(--primary-accent)', fontWeight: 600 }}>
+                        +{tx.unitsAdded?.toFixed(2)} kWh
+                      </td>
+                      <td style={{ padding: '10px', color: tx.addedToWallet ? 'var(--primary-accent)' : 'var(--text-muted)' }}>
+                        {tx.addedToWallet != null ? formatNaira(tx.addedToWallet) : 'â€”'}
+                      </td>
+                      <td style={{ padding: '10px', color: 'var(--text-muted)' }}>
+                        {tx.walletBalanceAfter != null ? formatNaira(tx.walletBalanceAfter) : 'â€”'}
+                      </td>
+                      <td style={{ padding: '10px' }}>
+                        <span style={{
+                          fontSize: '0.8rem',
+                          color: tx.status === 'Completed' ? 'var(--success)' : 'var(--text-muted)',
+                          background: tx.status === 'Completed' ? 'rgba(34,197,94,0.1)' : 'rgba(255,255,255,0.07)',
+                          padding: '2px 8px',
+                          borderRadius: '12px'
+                        }}>{tx.status}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             ) : (
               <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px 0' }}>
                 No past transactions found.

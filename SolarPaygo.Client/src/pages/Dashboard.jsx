@@ -41,6 +41,14 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
     (async () => {
       try {
         const token = localStorage.getItem('token');
+        const gRes = await fetch(`${BASE_URL}/devicegroup`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (gRes.ok) {
+          const gData = await gRes.json();
+          if (!cancelled && Array.isArray(gData)) setDeviceGroups(gData);
+        }
+
         const response = await fetch(`${BASE_URL}/generatorcapacity`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
@@ -69,6 +77,9 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
     return () => { cancelled = true; };
   }, []);
   const [regPricePlanId, setRegPricePlanId] = useState('');
+  const [regDeviceGroupId, setRegDeviceGroupId] = useState('');
+  const [deviceGroups, setDeviceGroups] = useState([]);
+  const [selectedGroupTab, setSelectedGroupTab] = useState('All');
   const [regError, setRegError] = useState(null);
   const [regSuccess, setRegSuccess] = useState(false);
   const [regLoading, setRegLoading] = useState(false);
@@ -104,7 +115,8 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
           customerDob: formattedDob,
           customerGender: regGender,
           generatorCapacity: regGeneratorCapacity,
-          pricePlanId: regPricePlanId ? parseInt(regPricePlanId, 10) : null
+          pricePlanId: regPricePlanId ? parseInt(regPricePlanId, 10) : null,
+          deviceGroupId: regDeviceGroupId ? parseInt(regDeviceGroupId, 10) : null
         })
       });
 
@@ -119,6 +131,7 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
         setRegDob('');
         setRegGeneratorCapacity('2KV');
         setRegPricePlanId('');
+        setRegDeviceGroupId('');
         refreshData();
         setTimeout(() => setIsRegisterOpen(false), 2000);
       } else {
@@ -157,6 +170,29 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
       console.error(`Failed to ${action} system ${id}`);
     } finally {
       setRelayLoading(null);
+    }
+  };
+
+  const [groupAssignLoading, setGroupAssignLoading] = useState(null);
+  const handleAssignGroup = async (systemId, deviceGroupId) => {
+    setGroupAssignLoading(systemId);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${BASE_URL}/dashboard/systems/${systemId}/group`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ deviceGroupId: deviceGroupId ? parseInt(deviceGroupId, 10) : null })
+      });
+      if (response.ok) {
+        refreshData();
+      }
+    } catch {
+      console.error('Failed to assign device group');
+    } finally {
+      setGroupAssignLoading(null);
     }
   };
 
@@ -255,7 +291,15 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
   const systems = summary.systems || summary.Systems || [];
   const activeSystems = systems.filter(s => s.status === 'Active' || s.status === 'active');
   const lockedSystems = systems.filter(s => s.status === 'Locked' || s.status === 'locked');
-  const filteredSystems = filter === 'All' ? systems : systems.filter(s => s.status === filter);
+  const groupFilteredSystems = selectedGroupTab === 'All'
+    ? systems
+    : selectedGroupTab === 'Ungrouped'
+      ? systems.filter(s => !s.deviceGroupId && !s.deviceGroup)
+      : systems.filter(s => (s.deviceGroup && s.deviceGroup.name === selectedGroupTab) || s.deviceGroupId === parseInt(selectedGroupTab, 10));
+
+  const filteredSystems = filter === 'All'
+    ? groupFilteredSystems
+    : groupFilteredSystems.filter(s => s.status === filter);
 
   // Derive overall sync health: green if ALL meters with a Stron ID reported online, orange/red otherwise
   const metersWithId = systems.filter(s => s.stronMeterId || s.StronMeterId);
@@ -366,8 +410,44 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
 
       {/* SOLAR GENERATOR UNITS SECTION */}
       <div className="glass-panel">
+        {/* Device Group / Tab Selector */}
+        {deviceGroups.length > 0 && (
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', overflowX: 'auto', paddingBottom: '8px', borderBottom: '1px solid var(--border-color)' }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', fontWeight: 'bold', marginRight: '4px' }}>
+              🏷️ Group Tabs:
+            </span>
+            <button
+              className={`filter-tab ${selectedGroupTab === 'All' ? 'active' : ''}`}
+              onClick={() => setSelectedGroupTab('All')}
+              style={{ fontSize: '0.82rem', padding: '6px 14px' }}
+            >
+              All Groups ({systems.length})
+            </button>
+            {deviceGroups.map(g => {
+              const count = systems.filter(s => s.deviceGroupId === g.id || (s.deviceGroup && s.deviceGroup.name === g.name)).length;
+              return (
+                <button
+                  key={g.id}
+                  className={`filter-tab ${selectedGroupTab === g.name ? 'active' : ''}`}
+                  onClick={() => setSelectedGroupTab(g.name)}
+                  style={{ fontSize: '0.82rem', padding: '6px 14px' }}
+                >
+                  {g.name} ({count})
+                </button>
+              );
+            })}
+            <button
+              className={`filter-tab ${selectedGroupTab === 'Ungrouped' ? 'active' : ''}`}
+              onClick={() => setSelectedGroupTab('Ungrouped')}
+              style={{ fontSize: '0.82rem', padding: '6px 14px' }}
+            >
+              Ungrouped ({systems.filter(s => !s.deviceGroupId && !s.deviceGroup).length})
+            </button>
+          </div>
+        )}
+
         <div className="panel-header">
-          <h2>Solar Systems Status</h2>
+          <h2>Solar Systems Status {selectedGroupTab !== 'All' ? `(${selectedGroupTab})` : ''}</h2>
           <div className="filter-tabs">
             {['All', 'Active', 'Locked', 'Disabled'].map(f => (
               <button key={f} className={`filter-tab ${filter === f ? 'active' : ''}`} onClick={() => setFilter(f)}>
@@ -430,13 +510,18 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                           Meter: {sys.stronMeterId}
                         </div>
                       )}
-                      {sys.generatorCapacity && (
-                        <div style={{ marginTop: '4px' }}>
+                      <div style={{ marginTop: '4px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                        {sys.generatorCapacity && (
                           <span style={{ background: 'rgba(250,200,50,0.12)', color: '#f5c842', padding: '2px 7px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold', fontFamily: 'monospace' }}>
-                            ⚡ {sys.generatorCapacity} Generator
+                            ⚡ {sys.generatorCapacity}
                           </span>
-                        </div>
-                      )}
+                        )}
+                        {sys.deviceGroup ? (
+                          <span style={{ background: 'rgba(59,130,246,0.15)', color: '#3b82f6', padding: '2px 7px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold' }}>
+                            🏷️ {sys.deviceGroup.name}
+                          </span>
+                        ) : null}
+                      </div>
                     </td>
                     
                     {/* Virtual Account details */}
@@ -830,6 +915,21 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                                   <div><strong style={{ color: 'var(--text-muted)' }}>Email Address:</strong> <span style={{ color: 'white' }}>{sys.customerEmail}</span></div>
                                   <div><strong style={{ color: 'var(--text-muted)' }}>Phone Number:</strong> <span style={{ color: 'white' }}>{sys.customerPhone}</span></div>
                                   <div><strong style={{ color: 'var(--text-muted)' }}>System Capacity:</strong> <span style={{ color: 'white' }}>{sys.generatorCapacity} ({sys.maxLoadWatts}W limit)</span></div>
+                                  <div>
+                                    <strong style={{ color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Device Group / Tab:</strong>
+                                    <select
+                                      value={sys.deviceGroupId || ''}
+                                      disabled={groupAssignLoading === sys.id}
+                                      onChange={(e) => handleAssignGroup(sys.id, e.target.value)}
+                                      onClick={(e) => e.stopPropagation()}
+                                      style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.85rem' }}
+                                    >
+                                      <option value="">No Group — Ungrouped</option>
+                                      {deviceGroups.map(g => (
+                                        <option key={g.id} value={g.id}>{g.name}</option>
+                                      ))}
+                                    </select>
+                                  </div>
                                   <div><strong style={{ color: 'var(--text-muted)' }}>Pending Wallet:</strong> <span style={{ color: 'white' }}>{formatNaira(sys.pendingWalletBalance)}</span> <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>(not yet converted to units)</span></div>
                                   <div>
                                     <strong style={{ color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>Price Band:</strong>
@@ -939,33 +1039,49 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
               </div>
             )}
 
-            <form onSubmit={handleRegisterSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Hardware ID (System Serial)</label>
-                  <div style={{ position: 'relative' }}>
-                    <Activity size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
-                    <input required type="text" value={regHardwareId} onChange={(e) => setRegHardwareId(e.target.value.toUpperCase())} placeholder="e.g. SG-007" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white' }} />
-                  </div>
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Stron Smart Meter ID</label>
-                  <div style={{ position: 'relative' }}>
-                    <FileText size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
-                    <input required type="text" maxLength="12" value={regMeterId} onChange={(e) => setRegMeterId(e.target.value.replace(/\D/g, ''))} placeholder="e.g. 9013151606" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white' }} />
-                  </div>
-                </div>
-              </div>
+            {(() => {
+              const selectedCapObj = capacities.find(c => c.code === regGeneratorCapacity);
+              const selectedPct = selectedCapObj ? (selectedCapObj.overloadThresholdPercent || 90) : 90;
 
-              <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>⚡ Generator Capacity</label>
-                <select required value={regGeneratorCapacity} onChange={(e) => setRegGeneratorCapacity(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }}>
-                  {capacities.map(c => (
-                    <option key={c.id ?? c.code} value={c.code}>{c.code} – {c.name}</option>
-                  ))}
-                </select>
-                <span style={{ fontSize: '0.7rem', color: 'var(--warning)', marginTop: '4px', display: 'block' }}>⚠️ Load must not exceed 90% of this capacity or the relay will automatically trip off.</span>
-              </div>
+              return (
+                <form onSubmit={handleRegisterSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Hardware ID (System Serial)</label>
+                      <div style={{ position: 'relative' }}>
+                        <Activity size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
+                        <input required type="text" value={regHardwareId} onChange={(e) => setRegHardwareId(e.target.value.toUpperCase())} placeholder="e.g. SG-007" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white' }} />
+                      </div>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Stron Smart Meter ID</label>
+                      <div style={{ position: 'relative' }}>
+                        <FileText size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
+                        <input required type="text" maxLength="12" value={regMeterId} onChange={(e) => setRegMeterId(e.target.value.replace(/\D/g, ''))} placeholder="e.g. 9013151606" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white' }} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>⚡ Generator Capacity</label>
+                      <select required value={regGeneratorCapacity} onChange={(e) => setRegGeneratorCapacity(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }}>
+                        {capacities.map(c => (
+                          <option key={c.id ?? c.code} value={c.code}>{c.code} – {c.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>🏷️ Tab/Group List</label>
+                      <select value={regDeviceGroupId} onChange={(e) => setRegDeviceGroupId(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }}>
+                        <option value="">No Group — Ungrouped</option>
+                        {deviceGroups.map(g => (
+                          <option key={g.id} value={g.id}>{g.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--warning)', marginTop: '-8px', display: 'block' }}>⚠️ Load must not exceed {selectedPct}% of this capacity or the relay will automatically trip off.</span>
 
               <div>
                 <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Price Band (optional)</label>
@@ -1037,6 +1153,7 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                 </button>
               </div>
             </form>
+              );            })()}
           </div>
         </div>
       )}

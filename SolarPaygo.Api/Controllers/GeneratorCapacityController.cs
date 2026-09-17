@@ -53,11 +53,13 @@ namespace SolarPaygo.Api.Controllers
             if (await _context.GeneratorCapacities.AnyAsync(c => c.Code == code))
                 return BadRequest($"A capacity with the code \"{code}\" already exists.");
 
+            var pct = request.OverloadThresholdPercent > 0 ? request.OverloadThresholdPercent : 90;
             var capacity = new GeneratorCapacity
             {
                 Code = code,
                 Name = request.Name.Trim(),
                 Watts = request.Watts,
+                OverloadThresholdPercent = pct,
                 IsActive = request.IsActive,
                 DisplayOrder = request.DisplayOrder,
                 CreatedAt = DateTime.UtcNow,
@@ -92,18 +94,17 @@ namespace SolarPaygo.Api.Controllers
             var inUse = await _context.SolarSystems.CountAsync(s => s.GeneratorCapacity == capacity.Code);
             var oldCode = capacity.Code;
 
+            var pct = request.OverloadThresholdPercent > 0 ? request.OverloadThresholdPercent : 90;
             capacity.Code = code;
             capacity.Name = request.Name.Trim();
             capacity.Watts = request.Watts;
+            capacity.OverloadThresholdPercent = pct;
             capacity.IsActive = request.IsActive;
             capacity.DisplayOrder = request.DisplayOrder;
             capacity.UpdatedAt = DateTime.UtcNow;
 
-            // Customers on this size are updated in the same save: the code so their stored
-            // value stays valid, and the ceiling so it matches what the size now means.
-            // Leaving the ceiling behind would let a generator run past its rated load until
-            // the next sync recalculated it, which is the window where a relay should have
-            // tripped and did not.
+            var effectiveMaxWatts = (int)Math.Round((double)request.Watts * pct / 100.0);
+
             var affected = await _context.SolarSystems
                 .Where(s => s.GeneratorCapacity == oldCode)
                 .ToListAsync();
@@ -111,7 +112,7 @@ namespace SolarPaygo.Api.Controllers
             foreach (var sys in affected)
             {
                 sys.GeneratorCapacity = code;
-                sys.MaxLoadWatts = request.Watts;
+                sys.MaxLoadWatts = effectiveMaxWatts;
             }
 
             await _context.SaveChangesAsync();
@@ -165,6 +166,8 @@ namespace SolarPaygo.Api.Controllers
             // A zero or negative ceiling would either trip instantly or never trip at all.
             if (request.Watts <= 0) return "Watts must be greater than zero.";
             if (request.Watts > 1_000_000) return "Watts looks wrong - that is over a megawatt.";
+            if (request.OverloadThresholdPercent <= 0 || request.OverloadThresholdPercent > 150)
+                return "Overload Threshold Percentage must be between 1 and 150%.";
 
             return null;
         }
@@ -174,6 +177,7 @@ namespace SolarPaygo.Api.Controllers
             public string Code { get; set; } = string.Empty;
             public string Name { get; set; } = string.Empty;
             public int Watts { get; set; }
+            public int OverloadThresholdPercent { get; set; } = 90;
             public bool IsActive { get; set; } = true;
             public int DisplayOrder { get; set; }
         }

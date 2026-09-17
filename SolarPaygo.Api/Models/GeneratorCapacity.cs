@@ -30,6 +30,11 @@ namespace SolarPaygo.Api.Models
         public int Watts { get; set; }
 
         /// <summary>
+        /// Overload threshold percentage of rated watts (default 90%).
+        /// </summary>
+        public int OverloadThresholdPercent { get; set; } = 90;
+
+        /// <summary>
         /// Retired sizes are hidden from the picker but still resolve for customers already on
         /// them. Deleting a size someone is using would strand that customer, so this is how a
         /// size is withdrawn.

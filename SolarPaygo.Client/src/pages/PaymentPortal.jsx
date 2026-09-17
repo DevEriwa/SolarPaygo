@@ -9,6 +9,24 @@ export default function PaymentPortal({ systems, systemsLoading, refreshData }) 
   
   // Results
   const [successData, setSuccessData] = useState(null);
+  const [capacities, setCapacities] = useState([]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(`${BASE_URL}/generatorcapacity`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data)) setCapacities(data);
+        }
+      } catch {
+        // Fallback handled below
+      }
+    })();
+  }, []);
   const [errorMsg, setErrorMsg] = useState(null);
 
   useEffect(() => {
@@ -19,6 +37,10 @@ export default function PaymentPortal({ systems, systemsLoading, refreshData }) 
   }, [systems, systemsLoading, selectedSystemId]);
 
   const selectedSystem = systems.find(s => s.id.toString() === selectedSystemId);
+  const matchedCap = selectedSystem ? capacities.find(c => c.code === selectedSystem.generatorCapacity) : null;
+  const thresholdPct = matchedCap ? (matchedCap.overloadThresholdPercent || 90) : 90;
+  const maxWatts = selectedSystem && selectedSystem.maxLoadWatts ? selectedSystem.maxLoadWatts : (matchedCap ? Math.round(matchedCap.watts * thresholdPct / 100) : 1800);
+  const capCode = selectedSystem?.generatorCapacity || '2KVA';
   const selectedPlan = selectedSystem?.pricePlan;
   const isDiscounted = selectedSystem
     ? (selectedPlan
@@ -101,10 +123,10 @@ export default function PaymentPortal({ systems, systemsLoading, refreshData }) 
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid var(--border-color)' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Maximum Power Output:</span>
-                <span style={{ fontWeight: 'bold' }}>
-                  {selectedSystem && selectedSystem.maxLoadWatts
-                    ? `${(selectedSystem.maxLoadWatts * 0.9).toFixed(0)}W (90% of ${selectedSystem.generatorCapacity || 'generator'} capacity)`
-                    : '90% of generator capacity'}
+                <span style={{ fontWeight: 'bold', color: 'var(--primary-accent)' }}>
+                  {selectedSystem
+                    ? `${maxWatts}W (${thresholdPct}% of ${capCode} capacity)`
+                    : 'Max load based on generator capacity'}
                 </span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>

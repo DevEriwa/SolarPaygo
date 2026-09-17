@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Zap, Save, CheckCircle2, Plus, Trash2, X, Pencil } from 'lucide-react';
 import { BASE_URL } from '../config';
 import GeneratorCapacitiesSection from './GeneratorCapacities';
+import DeviceGroupsSection from './DeviceGroups';
 
 const fieldStyle = { width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.9rem' };
 const subFieldLabel = { display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '4px' };
@@ -470,6 +471,7 @@ export default function SettingsPage({ pricePlans, refreshPricePlans }) {
       )}
 
       <GeneratorCapacitiesSection />
+      <DeviceGroupsSection />
     </div>
   );
 }
