@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import ScrollToTop from './components/ScrollToTop';
+﻿import { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, NavLink, Navigate } from 'react-router-dom';
 import { Sun, LayoutDashboard, CreditCard, Settings, LogOut } from 'lucide-react';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
@@ -11,6 +12,13 @@ import PaymentPortal from './pages/PaymentPortal';
 import SettingsPage from './pages/Settings';
 import Login from './pages/Login';
 import CustomerDashboard from './pages/customer/CustomerDashboard';
+import SuperAdminDashboard from './pages/superadmin/SuperAdminDashboard';
+import ImpersonationBanner from './components/ImpersonationBanner';
+import LandingPage from './pages/landing/LandingPage';
+import ContactPage from './pages/landing/ContactPage';
+import InvestorsPage from './pages/landing/InvestorsPage';
+import CustomerExperiencePage from './pages/landing/CustomerExperiencePage';
+import PilotingProgrammePage from './pages/landing/PilotingProgrammePage';
 
 const queryClient = new QueryClient();
 
@@ -34,6 +42,41 @@ function AppContent() {
   // (which is gated on role === 'Admin') stayed disabled for that first render and
   // the dashboard could sit on "Loading..." instead of fetching.
   const [role, setRole] = useState(() => decodeRoleFromToken(localStorage.getItem('token')));
+  const [ghostTarget, setGhostTarget] = useState(() => sessionStorage.getItem('impersonated_target'));
+  const [ghostRole, setGhostRole] = useState(() => sessionStorage.getItem('impersonated_role'));
+  const isImpersonating = !!sessionStorage.getItem('superadmin_master_token');
+
+  const handleStartImpersonate = (impersonatedToken, targetRole, targetName) => {
+    const currentMaster = localStorage.getItem('token');
+    sessionStorage.setItem('superadmin_master_token', currentMaster);
+    sessionStorage.setItem('impersonated_target', targetName);
+    sessionStorage.setItem('impersonated_role', targetRole);
+    setGhostTarget(targetName);
+    setGhostRole(targetRole);
+
+    localStorage.setItem('token', impersonatedToken);
+    setToken(impersonatedToken);
+    setRole(targetRole);
+    queryClient.clear();
+  };
+
+  const handleExitImpersonate = () => {
+    const masterToken = sessionStorage.getItem('superadmin_master_token');
+    sessionStorage.removeItem('superadmin_master_token');
+    sessionStorage.removeItem('impersonated_target');
+    sessionStorage.removeItem('impersonated_role');
+    setGhostTarget(null);
+    setGhostRole(null);
+
+    if (masterToken) {
+      localStorage.setItem('token', masterToken);
+      setToken(masterToken);
+      setRole('SuperAdmin');
+    } else {
+      handleLogout();
+    }
+    queryClient.clear();
+  };
 
   useEffect(() => {
     if (token) {
@@ -101,19 +144,42 @@ function AppContent() {
   if (!token) {
     return (
       <Routes>
-        <Route path="*" element={<Login setAuthToken={setToken} />} />
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/contact" element={<ContactPage />} />
+        <Route path="/investors" element={<InvestorsPage />} />
+        <Route path="/customer-experience" element={<CustomerExperiencePage />} />
+        <Route path="/piloting-programme" element={<PilotingProgrammePage />} />
+        <Route path="/login" element={<Login setAuthToken={setToken} />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+    );
+  }
+
+  // SuperAdmin Layout
+  if (role === 'SuperAdmin') {
+    return (
+      <>
+        {isImpersonating && (
+          <ImpersonationBanner role={ghostRole} target={ghostTarget} onExit={handleExitImpersonate} />
+        )}
+        <SuperAdminDashboard handleLogout={handleLogout} onImpersonate={handleStartImpersonate} />
+      </>
     );
   }
 
   // Admin Layout
   if (role === 'Admin') {
     return (
-      <div className="app-container">
+      <div className="app-container" style={isImpersonating ? { paddingTop: '42px' } : {}}>
+        {isImpersonating && (
+          <ImpersonationBanner role={ghostRole} target={ghostTarget} onExit={handleExitImpersonate} />
+        )}
         <aside className="sidebar">
-          <div className="sidebar-logo">
-            <Sun size={28} className="logo-icon" />
-            <span>SolarPay <span style={{fontWeight: 400}}>PAYGO</span></span>
+          <div className="sidebar-logo" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{ background: '#ffffff', padding: '3px 8px', borderRadius: '6px', display: 'inline-flex' }}>
+              <img src="/idiasco-logo.png" alt="IDIASCO" style={{ height: '30px', width: 'auto' }} />
+            </div>
+            <span>IDIASCO <span style={{fontWeight: 400, color: '#f59e0b', fontSize: '0.85em'}}>PAYGO</span></span>
           </div>
           
           <nav style={{ flex: 1 }}>
@@ -177,11 +243,16 @@ function AppContent() {
   // Customer Layout
   if (role === 'Customer') {
     return (
-      <div className="app-container">
+      <div className="app-container" style={isImpersonating ? { paddingTop: '42px' } : {}}>
+        {isImpersonating && (
+          <ImpersonationBanner role={ghostRole} target={ghostTarget} onExit={handleExitImpersonate} />
+        )}
         <aside className="sidebar">
-          <div className="sidebar-logo">
-            <Sun size={28} className="logo-icon" />
-            <span>My <span style={{fontWeight: 400}}>SolarPay</span></span>
+          <div className="sidebar-logo" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{ background: '#ffffff', padding: '3px 8px', borderRadius: '6px', display: 'inline-flex' }}>
+              <img src="/idiasco-logo.png" alt="IDIASCO" style={{ height: '30px', width: 'auto' }} />
+            </div>
+            <span>My <span style={{fontWeight: 400, color: '#10b981', fontSize: '0.85em'}}>IDIASCO</span></span>
           </div>
           
           <nav style={{ flex: 1 }}>
@@ -222,6 +293,7 @@ function AppContent() {
 function App() {
   return (
     <Router>
+      <ScrollToTop />
       <QueryClientProvider client={queryClient}>
         <AppContent />
       </QueryClientProvider>
@@ -230,3 +302,4 @@ function App() {
 }
 
 export default App;
+

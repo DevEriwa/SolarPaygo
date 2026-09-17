@@ -34,7 +34,32 @@ namespace SolarPaygo.Api.Controllers
             var username = request.Username?.Trim() ?? "";
             var password = request.Password?.Trim() ?? "";
 
-            // Admin Check
+            // Check DB AdminAccounts first
+            try
+            {
+                var adminUser = await _context.AdminAccounts.FirstOrDefaultAsync(a => a.Username.ToLower() == username.ToLower());
+                if (adminUser != null)
+                {
+                    if (!adminUser.IsActive)
+                    {
+                        return Unauthorized("This administrator account has been deactivated.");
+                    }
+                    if (adminUser.Password == password)
+                    {
+                        return Ok(new { Token = GenerateJwtToken(adminUser.Username, adminUser.Role, 0) });
+                    }
+                    return Unauthorized("Invalid credentials");
+                }
+            }
+            catch { /* fallback to hardcoded if table not yet queried */ }
+
+            // SuperAdmin Check
+            if (username.Equals("superadmin", StringComparison.OrdinalIgnoreCase) && password == "SuperAdmin@2026!")
+            {
+                return Ok(new { Token = GenerateJwtToken("superadmin", "SuperAdmin", 0) });
+            }
+
+            // Standard Admin Check
             if (username.Equals("admin", StringComparison.OrdinalIgnoreCase) && password == "admin123")
             {
                 return Ok(new { Token = GenerateJwtToken("admin", "Admin", 0) });
@@ -47,6 +72,10 @@ namespace SolarPaygo.Api.Controllers
                 
             if (system != null)
             {
+                if (system.Status == "Disabled" || system.Status == "Inactive")
+                {
+                    return Unauthorized("This customer account has been deactivated.");
+                }
                 return Ok(new { Token = GenerateJwtToken(system.CustomerEmail ?? string.Empty, "Customer", system.Id) });
             }
 

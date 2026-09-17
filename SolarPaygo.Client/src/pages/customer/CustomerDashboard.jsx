@@ -15,17 +15,21 @@ export default function CustomerDashboard() {
   const token = localStorage.getItem('token');
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['mySystem'],
+    queryKey: ['mySystem', token],
     queryFn: async () => {
+      const activeToken = localStorage.getItem('token');
       const response = await fetch(`${BASE_URL}/dashboard/my-system`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: { 'Authorization': `Bearer ${activeToken}` }
       });
       if (!response.ok) {
         if (response.status === 401) {
-          localStorage.removeItem('token');
-          window.location.reload();
+          // If not in ghost impersonation session, clean up
+          if (!sessionStorage.getItem('superadmin_master_token')) {
+            localStorage.removeItem('token');
+            window.location.reload();
+          }
         }
-        throw new Error('Network response was not ok');
+        throw new Error('Failed to fetch system details');
       }
       return response.json();
     },
@@ -75,7 +79,7 @@ export default function CustomerDashboard() {
     try {
       const response = await fetch(`${BASE_URL}/payment/redeem-wallet`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
       });
       const data = await response.json();
       if (response.ok) {

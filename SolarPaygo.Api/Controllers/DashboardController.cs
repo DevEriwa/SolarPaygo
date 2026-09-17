@@ -9,6 +9,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Security.Claims;
+using System.IdentityModel.Tokens.Jwt;
 
 namespace SolarPaygo.Api.Controllers
 {
@@ -229,32 +231,55 @@ namespace SolarPaygo.Api.Controllers
             return Ok(new { System = system, RecentUsage = logs, RecentTransactions = transactions });
         }
 
-        // New endpoint for Customers to fetch only their system
+        // Endpoint for Customers to fetch their system instantly from DB
         [Authorize(Roles = "Customer")]
         [HttpGet("my-system")]
-        public async Task<IActionResult> GetMySystem()
+        public async Task<IActionResult> GetMySystem([FromQuery] bool sync = false)
         {
             var systemIdClaim = User.Claims.FirstOrDefault(c => c.Type == "SystemId")?.Value;
-            if (string.IsNullOrEmpty(systemIdClaim) || !int.TryParse(systemIdClaim, out int systemId))
+            SolarSystem? system = null;
+
+            if (!string.IsNullOrEmpty(systemIdClaim) && int.TryParse(systemIdClaim, out int systemId))
             {
-                return Unauthorized();
+                system = await _context.SolarSystems.Include(s => s.PricePlan).FirstOrDefaultAsync(s => s.Id == systemId);
+            }
+            else
+            {
+                var sub = User.FindFirst(ClaimTypes.NameIdentifier)?.Value 
+                          ?? User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
+                          ?? User.FindFirst("sub")?.Value;
+                if (!string.IsNullOrEmpty(sub))
+                {
+                    system = await _context.SolarSystems.Include(s => s.PricePlan)
+                        .FirstOrDefaultAsync(s => (s.CustomerEmail != null && s.CustomerEmail.ToLower() == sub.ToLower()) || s.HardwareId.ToLower() == sub.ToLower());
+                }
             }
 
-            var system = await _context.SolarSystems.Include(s => s.PricePlan).FirstOrDefaultAsync(s => s.Id == systemId);
-            if (system == null) return NotFound();
+            if (system == null) return NotFound("Customer system not found");
 
-            // Sync this specific system
-            await SyncSystemAndApplyBilling(system);
-            await _context.SaveChangesAsync();
+            // Routine loads and polling read instantly from the database without blocking on remote cellular IoT.
+            // Only perform synchronous hardware sync if explicitly requested (e.g. ?sync=true)
+            if (sync)
+            {
+                try
+                {
+                    await SyncSystemAndApplyBilling(system);
+                    await _context.SaveChangesAsync();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[MySystem] Synchronous hardware sync failed for system {Id}", system.Id);
+                }
+            }
 
             var logs = await _context.UsageLogs
-                .Where(l => l.SolarSystemId == systemId)
+                .Where(l => l.SolarSystemId == system.Id)
                 .OrderByDescending(l => l.Timestamp)
                 .Take(20)
                 .ToListAsync();
 
             var transactions = await _context.Transactions
-                .Where(t => t.SolarSystemId == systemId)
+                .Where(t => t.SolarSystemId == system.Id)
                 .OrderByDescending(t => t.TransactionDate)
                 .Take(10)
                 .ToListAsync();
