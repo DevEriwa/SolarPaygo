@@ -236,6 +236,18 @@ using (var scope = app.Services.CreateScope())
                 ALTER TABLE Transactions ADD RateAtTime DECIMAL(18, 2) NULL;
             END
 
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'AdminAccounts')
+            BEGIN
+                CREATE TABLE AdminAccounts (
+                    Id INT IDENTITY(1,1) PRIMARY KEY,
+                    Username NVARCHAR(100) NOT NULL UNIQUE,
+                    Password NVARCHAR(200) NOT NULL,
+                    Role NVARCHAR(50) NOT NULL DEFAULT 'Admin',
+                    IsActive BIT NOT NULL DEFAULT 1,
+                    CreatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+                );
+            END
+
             IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'DeviceGroups')
             BEGIN
                 CREATE TABLE DeviceGroups (
@@ -303,6 +315,22 @@ using (var scope = app.Services.CreateScope())
     // identical the first time this runs and no existing customer's stored capacity string
     // stops resolving. Watts are stated rather than parsed from the code: "7.5KV" read as
     // digits gives 75, and a 75000W ceiling is a relay that never trips.
+    try
+    {
+        if (!db.AdminAccounts.Any())
+        {
+            db.AdminAccounts.AddRange(
+                new AdminAccount { Username = "superadmin", Password = "SuperAdmin@2026!", Role = "SuperAdmin", IsActive = true },
+                new AdminAccount { Username = "admin", Password = "admin123", Role = "Admin", IsActive = true }
+            );
+            db.SaveChanges();
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine("[DB Seed] Error seeding admin accounts: " + ex.Message);
+    }
+
     try
     {
         if (!db.GeneratorCapacities.Any())

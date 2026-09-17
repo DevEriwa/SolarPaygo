@@ -14,6 +14,7 @@ namespace SolarPaygo.Api.Data
         public DbSet<Transaction> Transactions { get; set; }
         public DbSet<PricePlan> PricePlans { get; set; }
         public DbSet<GeneratorCapacity> GeneratorCapacities { get; set; }
+        public DbSet<AdminAccount> AdminAccounts { get; set; }
         public DbSet<DeviceGroup> DeviceGroups { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
