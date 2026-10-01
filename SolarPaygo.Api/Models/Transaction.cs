@@ -41,6 +41,12 @@ namespace SolarPaygo.Api.Models
         public string? StsToken { get; set; }
         public string? PaymentReference { get; set; }
 
+        /// <summary>
+        /// True if the generated STS token has been confirmed delivered over-the-air to the physical meter.
+        /// If false (e.g. meter was offline during recharge), TelemetrySyncService will retry sending it once the meter connects.
+        /// </summary>
+        public bool IsDeliveredToMeter { get; set; } = false;
+
         public SolarSystem? SolarSystem { get; set; }
     }
 }

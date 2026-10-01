@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Lock, Unlock, MinusCircle, CreditCard, Plus, Activity, User, ShieldAlert, BadgeCheck, Phone, Mail, FileText, Coins } from 'lucide-react';
+import { Search, Lock, Unlock, MinusCircle, CreditCard, Plus, Activity, User, ShieldAlert, BadgeCheck, Phone, Mail, FileText, Coins } from 'lucide-react';
 import { BASE_URL } from '../config';
 
 export default function Dashboard({ dashboardData, loading, refreshData, pricePlans = [] }) {
@@ -80,6 +80,7 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
   const [regDeviceGroupId, setRegDeviceGroupId] = useState('');
   const [deviceGroups, setDeviceGroups] = useState([]);
   const [selectedGroupTab, setSelectedGroupTab] = useState('All');
+  const [searchTerm, setSearchTerm] = useState('');
   const [regError, setRegError] = useState(null);
   const [regSuccess, setRegSuccess] = useState(false);
   const [regLoading, setRegLoading] = useState(false);
@@ -230,14 +231,14 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
     setLoadingTransactions(prev => ({ ...prev, [systemId]: true }));
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${BASE_URL}/dashboard/systems/${systemId}`, {
+      const response = await fetch(`${BASE_URL}/dashboard/systems/${systemId}/transactions`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (response.ok) {
         const data = await response.json();
         setCustomerTransactions(prev => ({ 
           ...prev, 
-          [systemId]: data.recentTransactions || [] 
+          [systemId]: Array.isArray(data) ? data : (data.recentTransactions || [])
         }));
       }
     } catch (err) {
@@ -291,15 +292,37 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
   const systems = summary.systems || summary.Systems || [];
   const activeSystems = systems.filter(s => s.status === 'Active' || s.status === 'active');
   const lockedSystems = systems.filter(s => s.status === 'Locked' || s.status === 'locked');
+
+  const matchesSearch = (s, q) => {
+    if (!q) return true;
+    const term = q.toLowerCase().trim();
+    return (
+      (s.ownerName && s.ownerName.toLowerCase().includes(term)) ||
+      (s.hardwareId && s.hardwareId.toLowerCase().includes(term)) ||
+      (s.stronMeterId && s.stronMeterId.toLowerCase().includes(term)) ||
+      (s.customerEmail && s.customerEmail.toLowerCase().includes(term)) ||
+      (s.customerPhone && s.customerPhone.toLowerCase().includes(term)) ||
+      (s.virtualAccountNumber && s.virtualAccountNumber.toLowerCase().includes(term))
+    );
+  };
+
   const groupFilteredSystems = selectedGroupTab === 'All'
     ? systems
     : selectedGroupTab === 'Ungrouped'
       ? systems.filter(s => !s.deviceGroupId && !s.deviceGroup)
-      : systems.filter(s => (s.deviceGroup && s.deviceGroup.name === selectedGroupTab) || s.deviceGroupId === parseInt(selectedGroupTab, 10));
+      : systems.filter(s => {
+          if (s.deviceGroup && s.deviceGroup.name === selectedGroupTab) return true;
+          const g = deviceGroups.find(dg => dg.name === selectedGroupTab);
+          return g && s.deviceGroupId === g.id;
+        });
 
-  const filteredSystems = filter === 'All'
+  const customerFilteredSystems = groupFilteredSystems.filter(s => matchesSearch(s, searchTerm));
+
+  const statusFilteredSystems = filter === 'All'
     ? groupFilteredSystems
     : groupFilteredSystems.filter(s => s.status === filter);
+
+  const filteredSystems = statusFilteredSystems.filter(s => matchesSearch(s, searchTerm));
 
   // Derive overall sync health: green if ALL meters with a Stron ID reported online, orange/red otherwise
   const metersWithId = systems.filter(s => s.stronMeterId || s.StronMeterId);
@@ -446,14 +469,43 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
           </div>
         )}
 
-        <div className="panel-header">
+        <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
           <h2>Solar Systems Status {selectedGroupTab !== 'All' ? `(${selectedGroupTab})` : ''}</h2>
-          <div className="filter-tabs">
-            {['All', 'Active', 'Locked', 'Disabled'].map(f => (
-              <button key={f} className={`filter-tab ${filter === f ? 'active' : ''}`} onClick={() => setFilter(f)}>
-                {f}
-              </button>
-            ))}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <div style={{ position: 'relative', width: '250px' }}>
+              <Search size={15} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <input
+                type="text"
+                placeholder="Search device, meter, customer..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '7px 28px 7px 32px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--border-color)',
+                  background: 'rgba(255,255,255,0.04)',
+                  color: 'white',
+                  fontSize: '0.84rem',
+                  outline: 'none'
+                }}
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm('')}
+                  style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1rem', lineHeight: 1 }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+            <div className="filter-tabs">
+              {['All', 'Active', 'Locked', 'Disabled'].map(f => (
+                <button key={f} className={`filter-tab ${filter === f ? 'active' : ''}`} onClick={() => setFilter(f)}>
+                  {f}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -784,8 +836,69 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
       ) : (
         /* CUSTOMERS & TRANSACTIONS DATABASE VIEW */
         <div className="glass-panel" style={{ width: '100%' }}>
-          <div className="panel-header" style={{ marginBottom: '20px' }}>
-            <h2>Registered Customers & Account Information</h2>
+          {/* Device Group / Tab Selector */}
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', overflowX: 'auto', paddingBottom: '8px', borderBottom: '1px solid var(--border-color)', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', fontWeight: 'bold', marginRight: '4px' }}>
+              🏷️ Group Tabs:
+            </span>
+            <button
+              className={`filter-tab ${selectedGroupTab === 'All' ? 'active' : ''}`}
+              onClick={() => setSelectedGroupTab('All')}
+              style={{ fontSize: '0.82rem', padding: '6px 14px' }}
+            >
+              All Groups ({systems.length})
+            </button>
+            {deviceGroups.map(g => {
+              const count = systems.filter(s => s.deviceGroupId === g.id || (s.deviceGroup && s.deviceGroup.name === g.name)).length;
+              return (
+                <button
+                  key={g.id}
+                  className={`filter-tab ${selectedGroupTab === g.name ? 'active' : ''}`}
+                  onClick={() => setSelectedGroupTab(g.name)}
+                  style={{ fontSize: '0.82rem', padding: '6px 14px' }}
+                >
+                  {g.name} ({count})
+                </button>
+              );
+            })}
+            <button
+              className={`filter-tab ${selectedGroupTab === 'Ungrouped' ? 'active' : ''}`}
+              onClick={() => setSelectedGroupTab('Ungrouped')}
+              style={{ fontSize: '0.82rem', padding: '6px 14px' }}
+            >
+              Ungrouped ({systems.filter(s => !s.deviceGroupId && !s.deviceGroup).length})
+            </button>
+          </div>
+
+          <div className="panel-header" style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
+            <h2>Registered Customers &amp; Account Information {selectedGroupTab !== 'All' ? `(${selectedGroupTab})` : ''}</h2>
+            <div style={{ position: 'relative', width: '280px' }}>
+              <Search size={15} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <input
+                type="text"
+                placeholder="Search name, email, phone, meter..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '7px 28px 7px 32px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--border-color)',
+                  background: 'rgba(255,255,255,0.04)',
+                  color: 'white',
+                  fontSize: '0.84rem',
+                  outline: 'none'
+                }}
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm('')}
+                  style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1rem', lineHeight: 1 }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
           </div>
 
           {bandAssignError && (
@@ -801,13 +914,14 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                 <tr>
                   <th>Customer Name & Contact</th>
                   <th>System & Meter Profile</th>
+                  <th>User Status & Relay</th>
                   <th>Squad Virtual Account</th>
                   <th>Naira Balance</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {systems.map(sys => {
+                {customerFilteredSystems.map(sys => {
                   const txs = customerTransactions[sys.id] || [];
                   const txsLoading = loadingTransactions[sys.id];
                   const isExpanded = expandedCustomerId === sys.id;
@@ -842,13 +956,48 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                               Meter ID: {sys.stronMeterId}
                             </div>
                           )}
-                          {sys.generatorCapacity && (
-                            <div style={{ marginTop: '4px' }}>
+                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
+                            {sys.generatorCapacity && (
                               <span style={{ background: 'rgba(250,200,50,0.1)', color: '#f5c842', padding: '2px 6px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 'bold' }}>
                                 ⚡ {sys.generatorCapacity} Generator
                               </span>
+                            )}
+                            {sys.deviceGroup ? (
+                              <span style={{ background: 'rgba(59,130,246,0.15)', color: '#3b82f6', padding: '2px 6px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 'bold' }}>
+                                🏷️ {sys.deviceGroup.name}
+                              </span>
+                            ) : null}
+                          </div>
+                        </td>
+
+                        {/* User Status & Relay */}
+                        <td>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              padding: '2px 8px',
+                              borderRadius: '12px',
+                              fontSize: '0.75rem',
+                              fontWeight: 600,
+                              width: 'fit-content',
+                              background: (sys.status || '').toLowerCase() === 'active' ? 'rgba(16,185,129,0.12)' : (sys.status || '').toLowerCase() === 'locked' ? 'rgba(239,68,68,0.12)' : 'rgba(255,255,255,0.06)',
+                              color: (sys.status || '').toLowerCase() === 'active' ? 'var(--success)' : (sys.status || '').toLowerCase() === 'locked' ? 'var(--danger)' : 'var(--text-muted)',
+                              border: `1px solid ${(sys.status || '').toLowerCase() === 'active' ? 'rgba(16,185,129,0.3)' : (sys.status || '').toLowerCase() === 'locked' ? 'rgba(239,68,68,0.3)' : 'rgba(255,255,255,0.1)'}`
+                            }}>
+                              {(sys.status || '').toLowerCase() === 'active' ? '● Active' : (sys.status || '').toLowerCase() === 'locked' ? '● Locked' : `● ${sys.status || 'Disabled'}`}
+                            </span>
+                            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'flex', gap: '6px' }}>
+                              <span style={{ color: sys.relayState === '1' ? 'var(--success)' : 'var(--danger)' }}>
+                                {sys.relayState === '1' ? '⚡ Relay ON' : '⭕ Relay Cut'}
+                              </span>
+                              <span>·</span>
+                              <span style={{ color: sys.meterOnline || sys.MeterOnline ? 'var(--success)' : 'var(--warning)' }}>
+                                {sys.meterOnline || sys.MeterOnline ? 'Online' : 'Offline'}
+                              </span>
                             </div>
-                          )}
+                          </div>
                         </td>
 
                         {/* Squad Account */}
@@ -899,7 +1048,7 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                       {/* EXPANDED PROFILE & HISTORY DETAILS */}
                       {isExpanded && (
                         <tr style={{ background: 'rgba(0, 0, 0, 0.2)' }}>
-                          <td colSpan="5" style={{ padding: '24px', borderTop: '1px solid var(--border-color)', borderBottom: '1px solid var(--border-color)' }}>
+                          <td colSpan="6" style={{ padding: '24px', borderTop: '1px solid var(--border-color)', borderBottom: '1px solid var(--border-color)' }}>
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '32px' }}>
                               
                               {/* Complete Profile Cards */}
@@ -1010,7 +1159,10 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                   );
                 })}
                 {systems.length === 0 && (
-                  <tr><td colSpan="5" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px' }}>No registered customers found.</td></tr>
+                  <tr><td colSpan="6" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px' }}>No registered customers found.</td></tr>
+                )}
+                {customerFilteredSystems.length === 0 && !loading && (
+                  <tr><td colSpan="6" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px' }}>No customers match the current group or search filter.</td></tr>
                 )}
               </tbody>
             </table>

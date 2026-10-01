@@ -503,7 +503,8 @@ namespace SolarPaygo.Api.Controllers
                 Status = "Completed",
                 StsToken = stsToken,
                 PaymentReference = reference,
-                TransactionDate = DateTime.UtcNow
+                TransactionDate = DateTime.UtcNow,
+                IsDeliveredToMeter = otaSuccess
             };
 
             // Update system units

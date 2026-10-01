@@ -105,6 +105,49 @@ namespace SolarPaygo.Api.Services
                             continue;
                         }
 
+                        // Offline Recharge Auto-Delivery: Deliver any pending offline tokens now that meter is online
+                        var undeliveredTokens = await db.Transactions
+                            .Where(t => t.SolarSystemId == sys.Id && !t.IsDeliveredToMeter && !string.IsNullOrEmpty(t.StsToken))
+                            .OrderBy(t => t.TransactionDate)
+                            .ToListAsync(cancellationToken);
+
+                        if (undeliveredTokens.Count > 0)
+                        {
+                            _logger.LogInformation("[TelemetrySync] Meter {MeterId} is back online! Delivering {Count} pending offline tokens...", sys.StronMeterId, undeliveredTokens.Count);
+                            bool anyDelivered = false;
+                            foreach (var pendingTx in undeliveredTokens)
+                            {
+                                bool sent = await vendingService.SendTokenRemotelyAsync(sys.StronMeterId, pendingTx.StsToken!);
+                                if (sent)
+                                {
+                                    pendingTx.IsDeliveredToMeter = true;
+                                    anyDelivered = true;
+                                    _logger.LogInformation("[TelemetrySync] Successfully delivered offline token {Token} to meter {MeterId}!", pendingTx.StsToken, sys.StronMeterId);
+                                }
+                                else
+                                {
+                                    _logger.LogWarning("[TelemetrySync] Could not deliver offline token {Token} to meter {MeterId}. Will retry next cycle.", pendingTx.StsToken, sys.StronMeterId);
+                                }
+                            }
+
+                            if (anyDelivered)
+                            {
+                                sys.Status = "Active";
+                                sys.RelayState = "1";
+                                await vendingService.SetRemoteSwitchAsync(sys.StronMeterId, turnOn: true);
+
+                                try
+                                {
+                                    var refreshed = await vendingService.QueryMeterStatusAsync(sys.StronMeterId, DateTime.UtcNow);
+                                    if (refreshed != null) status = refreshed;
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogWarning(ex, "[TelemetrySync] Error refreshing meter status after token delivery");
+                                }
+                            }
+                        }
+
                         // Update live telemetry data
                         sys.Voltage = status.Voltage;
                         sys.Current = status.Current;
