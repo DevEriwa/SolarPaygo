@@ -110,6 +110,49 @@ namespace SolarPaygo.Api.Controllers
             var status = await _vendingService.QueryMeterStatusAsync(sys.StronMeterId, DateTime.UtcNow);
             if (status == null) return false; // Meter offline — skip sync, return offline
 
+            // Offline Recharge Auto-Delivery: Deliver any pending offline tokens now that meter is online
+            var undeliveredTokens = await _context.Transactions
+                .Where(t => t.SolarSystemId == sys.Id && !t.IsDeliveredToMeter && !string.IsNullOrEmpty(t.StsToken))
+                .OrderBy(t => t.TransactionDate)
+                .ToListAsync();
+
+            if (undeliveredTokens.Count > 0)
+            {
+                _logger.LogInformation("[SyncSystemAndApplyBilling] Meter {MeterId} is online! Delivering {Count} pending offline tokens...", sys.StronMeterId, undeliveredTokens.Count);
+                bool anyDelivered = false;
+                foreach (var pendingTx in undeliveredTokens)
+                {
+                    bool sent = await _vendingService.SendTokenRemotelyAsync(sys.StronMeterId, pendingTx.StsToken!);
+                    if (sent)
+                    {
+                        pendingTx.IsDeliveredToMeter = true;
+                        anyDelivered = true;
+                        _logger.LogInformation("[SyncSystemAndApplyBilling] Successfully delivered offline token {Token} to meter {MeterId}!", pendingTx.StsToken, sys.StronMeterId);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("[SyncSystemAndApplyBilling] Could not deliver token {Token} to meter {MeterId}. Will retry.", pendingTx.StsToken, sys.StronMeterId);
+                    }
+                }
+
+                if (anyDelivered)
+                {
+                    sys.Status = "Active";
+                    sys.RelayState = "1";
+                    await _vendingService.SetRemoteSwitchAsync(sys.StronMeterId, turnOn: true);
+
+                    try
+                    {
+                        var refreshed = await _vendingService.QueryMeterStatusAsync(sys.StronMeterId, DateTime.UtcNow);
+                        if (refreshed != null) status = refreshed;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "[SyncSystemAndApplyBilling] Error refreshing meter status after token delivery");
+                    }
+                }
+            }
+
             // Update live telemetry data
             sys.Voltage = status.Voltage;
             sys.Current = status.Current;
@@ -211,14 +254,24 @@ namespace SolarPaygo.Api.Controllers
 
         [Authorize(Roles = "Admin")]
         [HttpGet("systems/{id}")]
-        public async Task<IActionResult> GetSystemDetails(int id)
+        public async Task<IActionResult> GetSystemDetails(int id, [FromQuery] bool sync = false)
         {
             var system = await _context.SolarSystems.Include(s => s.PricePlan).FirstOrDefaultAsync(s => s.Id == id);
             if (system == null) return NotFound();
 
-            // Sync this specific system before returning details
-            await SyncSystemAndApplyBilling(system);
-            await _context.SaveChangesAsync();
+            // Synchronous hardware IoT sync only if explicitly requested (e.g. ?sync=true)
+            if (sync)
+            {
+                try
+                {
+                    await SyncSystemAndApplyBilling(system);
+                    await _context.SaveChangesAsync();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[GetSystemDetails] Remote IoT sync failed for system {Id}", id);
+                }
+            }
 
             var logs = await _context.UsageLogs
                 .Where(l => l.SolarSystemId == id)
@@ -229,10 +282,45 @@ namespace SolarPaygo.Api.Controllers
             var transactions = await _context.Transactions
                 .Where(t => t.SolarSystemId == id)
                 .OrderByDescending(t => t.TransactionDate)
-                .Take(10)
+                .Take(20)
                 .ToListAsync();
 
-            return Ok(new { System = system, RecentUsage = logs, RecentTransactions = transactions });
+            // Include computed MeterOnline flag (true if last sync within 15 minutes)
+            bool meterOnline = system.LastSyncTime.HasValue && (DateTime.UtcNow - system.LastSyncTime.Value).TotalMinutes < 15;
+
+            return Ok(new {
+                System = new {
+                    system.Id, system.HardwareId, system.Status, system.AvailableUnits, system.OwnerName,
+                    system.StronMeterId, system.VirtualAccountNumber, system.VirtualBankName,
+                    system.CustomerEmail, system.CustomerPhone, system.PrepaidNairaBalance,
+                    system.PendingWalletBalance, system.CumulativeKwhConsumed, system.CumulativeKwhBought,
+                    system.LastSyncTime, system.LastSyncKwh, system.MaxLoadWatts,
+                    system.DailyKwhConsumed, system.DailyTimeActiveHours, system.DailyAmountCharged,
+                    system.Voltage, system.Current, system.Power, system.RelayState, system.CoverState,
+                    system.GeneratorCapacity, system.PricePlanId, system.DeviceGroupId,
+                    PricePlan = system.PricePlan == null ? null : new {
+                        system.PricePlan.Id, system.PricePlan.Band, system.PricePlan.Name,
+                        system.PricePlan.PricePerKwh
+                    },
+                    MeterOnline = meterOnline
+                },
+                RecentUsage = logs,
+                RecentTransactions = transactions
+            });
+        }
+
+        // Fast endpoint for loading customer transaction history instantly from DB without IoT delays
+        [Authorize(Roles = "Admin")]
+        [HttpGet("systems/{id}/transactions")]
+        public async Task<IActionResult> GetSystemTransactions(int id)
+        {
+            var transactions = await _context.Transactions
+                .Where(t => t.SolarSystemId == id)
+                .OrderByDescending(t => t.TransactionDate)
+                .Take(25)
+                .ToListAsync();
+
+            return Ok(transactions);
         }
 
         // Endpoint for Customers to fetch their system instantly from DB
@@ -288,7 +376,28 @@ namespace SolarPaygo.Api.Controllers
                 .Take(10)
                 .ToListAsync();
 
-            return Ok(new { System = system, RecentUsage = logs, RecentTransactions = transactions });
+            // Include computed MeterOnline flag (true if last sync within 15 minutes)
+            bool meterOnline = system.LastSyncTime.HasValue && (DateTime.UtcNow - system.LastSyncTime.Value).TotalMinutes < 15;
+
+            return Ok(new {
+                System = new {
+                    system.Id, system.HardwareId, system.Status, system.AvailableUnits, system.OwnerName,
+                    system.StronMeterId, system.VirtualAccountNumber, system.VirtualBankName,
+                    system.CustomerEmail, system.CustomerPhone, system.PrepaidNairaBalance,
+                    system.PendingWalletBalance, system.CumulativeKwhConsumed, system.CumulativeKwhBought,
+                    system.LastSyncTime, system.LastSyncKwh, system.MaxLoadWatts,
+                    system.DailyKwhConsumed, system.DailyTimeActiveHours, system.DailyAmountCharged,
+                    system.Voltage, system.Current, system.Power, system.RelayState, system.CoverState,
+                    system.GeneratorCapacity, system.PricePlanId, system.DeviceGroupId,
+                    PricePlan = system.PricePlan == null ? null : new {
+                        system.PricePlan.Id, system.PricePlan.Band, system.PricePlan.Name,
+                        system.PricePlan.PricePerKwh
+                    },
+                    MeterOnline = meterOnline
+                },
+                RecentUsage = logs,
+                RecentTransactions = transactions
+            });
         }
 
         public class RegisterSystemRequest

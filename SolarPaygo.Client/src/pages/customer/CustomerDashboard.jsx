@@ -154,16 +154,33 @@ export default function CustomerDashboard() {
     return new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN' }).format(amount);
   };
 
-  // Status badge colours â€” mirrors the admin dashboard palette
-  const statusColor = system.status === 'Active' ? 'var(--success)'
-    : system.status === 'Locked' ? 'var(--danger)'
-    : 'var(--text-muted)';
-  const statusBg = system.status === 'Active' ? 'rgba(16,185,129,0.12)'
-    : system.status === 'Locked' ? 'rgba(239,68,68,0.12)'
-    : 'rgba(255,255,255,0.06)';
-  const StatusIcon = system.status === 'Active' ? CheckCircle
-    : system.status === 'Locked' ? XCircle
-    : AlertCircle;
+  // Customer-side User & System Status calculation
+  const rawStatus = (system.status || '').trim().toLowerCase();
+  const isRelayOn = system.relayState === '1';
+  const hasEnergy = (system.availableUnits || 0) > 0 || (system.prepaidNairaBalance || 0) > 0;
+  const isMeterOnline = system.meterOnline || system.MeterOnline || (system.lastSyncTime ? (new Date() - new Date(system.lastSyncTime)) < 15 * 60 * 1000 : false);
+
+  let statusText = 'Active & Powered ON';
+  let statusColor = 'var(--success)';
+  let statusBg = 'rgba(16,185,129,0.12)';
+  let StatusIcon = CheckCircle;
+
+  if (rawStatus === 'disabled' || rawStatus === 'inactive') {
+    statusText = 'Account Deactivated';
+    statusColor = 'var(--danger)';
+    statusBg = 'rgba(239,68,68,0.12)';
+    StatusIcon = XCircle;
+  } else if (!isRelayOn || !hasEnergy || rawStatus === 'locked') {
+    statusText = 'Power Cut (Relay Open)';
+    statusColor = 'var(--danger)';
+    statusBg = 'rgba(239,68,68,0.12)';
+    StatusIcon = XCircle;
+  } else {
+    statusText = 'Active & Powered ON';
+    statusColor = 'var(--success)';
+    statusBg = 'rgba(16,185,129,0.12)';
+    StatusIcon = CheckCircle;
+  }
 
   return (
     <div className="dashboard">
@@ -173,24 +190,48 @@ export default function CustomerDashboard() {
           <p className="subtitle">{system.hardwareId}</p>
         </div>
 
-        {/* Active / Not Active status badge â€” read-only, mirrors admin view */}
-        <div style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '8px',
-          padding: '8px 18px',
-          borderRadius: '999px',
-          background: statusBg,
-          border: `1px solid ${statusColor}`,
-          color: statusColor,
-          fontWeight: 700,
-          fontSize: '0.9rem',
-          letterSpacing: '0.02em'
-        }}>
-          <StatusIcon size={16} />
-          {system.status === 'Active' ? 'Active'
-            : system.status === 'Locked' ? 'Not Active (Locked)'
-            : system.status}
+        {/* User & Meter Status Badges */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '8px 18px',
+            borderRadius: '999px',
+            background: statusBg,
+            border: `1px solid ${statusColor}`,
+            color: statusColor,
+            fontWeight: 700,
+            fontSize: '0.9rem',
+            letterSpacing: '0.02em'
+          }}>
+            <StatusIcon size={16} />
+            {statusText}
+          </div>
+
+          {system.stronMeterId && (
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 14px',
+              borderRadius: '999px',
+              background: isMeterOnline ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)',
+              border: `1px solid ${isMeterOnline ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
+              color: isMeterOnline ? 'var(--success)' : 'var(--danger)',
+              fontSize: '0.8rem',
+              fontWeight: 600
+            }}>
+              <span style={{
+                width: '7px',
+                height: '7px',
+                borderRadius: '50%',
+                background: isMeterOnline ? 'var(--success)' : 'var(--danger)',
+                display: 'inline-block'
+              }}></span>
+              {isMeterOnline ? 'Meter Online' : 'Meter Offline'}
+            </div>
+          )}
         </div>
       </div>
 
