@@ -190,41 +190,24 @@ export default function CustomerDashboard() {
           <p className="subtitle">{system.hardwareId}</p>
         </div>
 
-        {/* User & Meter Status Badges */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-          <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '8px 18px',
-            borderRadius: '999px',
-            background: statusBg,
-            border: `1px solid ${statusColor}`,
-            color: statusColor,
-            fontWeight: 700,
-            fontSize: '0.9rem',
-            letterSpacing: '0.02em'
-          }}>
-            <StatusIcon size={16} />
-            {statusText}
-          </div>
-
-          {system.stronMeterId && (
+        {/* Meter Status Badge */}
+        <div>
+          {(system.stronMeterId || system.StronMeterId || system.hardwareId) && (
             <div style={{
               display: 'inline-flex',
               alignItems: 'center',
-              gap: '6px',
-              padding: '6px 14px',
+              gap: '8px',
+              padding: '8px 18px',
               borderRadius: '999px',
-              background: isMeterOnline ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)',
+              background: isMeterOnline ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
               border: `1px solid ${isMeterOnline ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
               color: isMeterOnline ? 'var(--success)' : 'var(--danger)',
-              fontSize: '0.8rem',
+              fontSize: '0.9rem',
               fontWeight: 600
             }}>
               <span style={{
-                width: '7px',
-                height: '7px',
+                width: '8px',
+                height: '8px',
                 borderRadius: '50%',
                 background: isMeterOnline ? 'var(--success)' : 'var(--danger)',
                 display: 'inline-block'

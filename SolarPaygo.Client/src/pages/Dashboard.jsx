@@ -914,7 +914,7 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                 <tr>
                   <th>Customer Name & Contact</th>
                   <th>System & Meter Profile</th>
-                  <th>User Status & Relay</th>
+                  <th>Meter Status & Relay</th>
                   <th>Squad Virtual Account</th>
                   <th>Naira Balance</th>
                   <th>Actions</th>
@@ -970,31 +970,34 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                           </div>
                         </td>
 
-                        {/* User Status & Relay */}
+                        {/* Meter Status & Relay */}
                         <td>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                             <span style={{
                               display: 'inline-flex',
                               alignItems: 'center',
-                              gap: '4px',
+                              gap: '5px',
                               padding: '2px 8px',
                               borderRadius: '12px',
                               fontSize: '0.75rem',
                               fontWeight: 600,
                               width: 'fit-content',
-                              background: (sys.status || '').toLowerCase() === 'active' ? 'rgba(16,185,129,0.12)' : (sys.status || '').toLowerCase() === 'locked' ? 'rgba(239,68,68,0.12)' : 'rgba(255,255,255,0.06)',
-                              color: (sys.status || '').toLowerCase() === 'active' ? 'var(--success)' : (sys.status || '').toLowerCase() === 'locked' ? 'var(--danger)' : 'var(--text-muted)',
-                              border: `1px solid ${(sys.status || '').toLowerCase() === 'active' ? 'rgba(16,185,129,0.3)' : (sys.status || '').toLowerCase() === 'locked' ? 'rgba(239,68,68,0.3)' : 'rgba(255,255,255,0.1)'}`
+                              background: (sys.meterOnline || sys.MeterOnline) ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)',
+                              color: (sys.meterOnline || sys.MeterOnline) ? 'var(--success)' : 'var(--danger)',
+                              border: `1px solid ${(sys.meterOnline || sys.MeterOnline) ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`
                             }}>
-                              {(sys.status || '').toLowerCase() === 'active' ? '● Active' : (sys.status || '').toLowerCase() === 'locked' ? '● Locked' : `● ${sys.status || 'Disabled'}`}
+                              <span style={{
+                                width: '6px',
+                                height: '6px',
+                                borderRadius: '50%',
+                                background: (sys.meterOnline || sys.MeterOnline) ? 'var(--success)' : 'var(--danger)',
+                                display: 'inline-block'
+                              }}></span>
+                              {(sys.meterOnline || sys.MeterOnline) ? 'Online' : 'Offline'}
                             </span>
-                            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'flex', gap: '6px' }}>
+                            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
                               <span style={{ color: sys.relayState === '1' ? 'var(--success)' : 'var(--danger)' }}>
                                 {sys.relayState === '1' ? '⚡ Relay ON' : '⭕ Relay Cut'}
-                              </span>
-                              <span>·</span>
-                              <span style={{ color: sys.meterOnline || sys.MeterOnline ? 'var(--success)' : 'var(--warning)' }}>
-                                {sys.meterOnline || sys.MeterOnline ? 'Online' : 'Offline'}
                               </span>
                             </div>
                           </div>
