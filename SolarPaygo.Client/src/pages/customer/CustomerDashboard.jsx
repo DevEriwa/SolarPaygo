@@ -242,7 +242,7 @@ export default function CustomerDashboard() {
           </div>
           <div className="stat-info">
             <h3>Available Units</h3>
-            <div className="stat-value">{system.availableUnits.toFixed(2)} <span style={{fontSize: '1rem', color: 'var(--text-muted)'}}>kWh</span></div>
+            <div className="stat-value">{(system.availableUnits ?? 0).toFixed(2)} <span style={{fontSize: '1rem', color: 'var(--text-muted)'}}>kWh</span></div>
           </div>
         </div>
 
@@ -272,7 +272,7 @@ export default function CustomerDashboard() {
           </div>
           <div className="stat-info">
             <h3>Current Power Draw</h3>
-            <div className="stat-value">{system.power.toFixed(0)} <span style={{fontSize: '1rem', color: 'var(--text-muted)'}}>W</span></div>
+            <div className="stat-value">{(system.power ?? 0).toFixed(0)} <span style={{fontSize: '1rem', color: 'var(--text-muted)'}}>W</span></div>
           </div>
         </div>
       </div>

@@ -236,6 +236,11 @@ using (var scope = app.Services.CreateScope())
                 ALTER TABLE Transactions ADD RateAtTime DECIMAL(18, 2) NULL;
             END
 
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Transactions') AND name = 'IsDeliveredToMeter')
+            BEGIN
+                ALTER TABLE Transactions ADD IsDeliveredToMeter BIT NOT NULL DEFAULT 0;
+            END
+
             IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'AdminAccounts')
             BEGIN
                 CREATE TABLE AdminAccounts (
