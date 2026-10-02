@@ -50,10 +50,10 @@
 .section-badge { display: inline-flex; align-items: center; gap: 6px; padding: 5px 14px; background: var(--lp-accent-glow); border: 1px solid rgba(230,126,0,0.25); border-radius: 100px; font-size: 0.75rem; font-weight: 700; color: var(--lp-accent); letter-spacing: 0.07em; text-transform: uppercase; margin-bottom: 18px; }
 .section-badge.green { background: var(--lp-green-glow); border-color: rgba(10,138,96,0.25); color: var(--lp-green); }
 .section-badge.blue { background: rgba(30,92,191,0.08); border-color: rgba(30,92,191,0.25); color: var(--lp-blue); }
-.section-title { font-size: clamp(1.9rem, 3.8vw, 2.9rem); font-weight: 800; color: var(--lp-text); line-height: 1.15; margin-bottom: 14px; letter-spacing: -0.025em; }
-.section-title .ac { color: var(--lp-accent); }
-.section-title .gr { color: var(--lp-green); }
-.section-title .bl { color: var(--lp-blue); }
+.landing-page .section-title, .contact-page .section-title { font-size: clamp(1.9rem, 3.8vw, 2.9rem); font-weight: 800; color: var(--lp-text); line-height: 1.15; margin-bottom: 14px; letter-spacing: -0.025em; }
+.landing-page .section-title .ac, .contact-page .section-title .ac { color: var(--lp-accent); }
+.landing-page .section-title .gr, .contact-page .section-title .gr { color: var(--lp-green); }
+.landing-page .section-title .bl, .contact-page .section-title .bl { color: var(--lp-blue); }
 .section-sub { font-size: 1.05rem; color: var(--lp-muted); max-width: 580px; line-height: 1.72; margin-bottom: 44px; }
 
 /* --- Buttons --- */

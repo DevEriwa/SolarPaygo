@@ -366,12 +366,13 @@ body {
   margin-top: 40px;
 }
 
-.section-title {
+.section-title,
+.dashboard .section-title {
   font-size: 1.1rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--text-muted);
+  color: #ffffff !important;
   margin-bottom: 24px;
 }
 
