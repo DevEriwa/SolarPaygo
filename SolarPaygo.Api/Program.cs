@@ -241,6 +241,16 @@ using (var scope = app.Services.CreateScope())
                 ALTER TABLE Transactions ADD IsDeliveredToMeter BIT NOT NULL DEFAULT 0;
             END
 
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('SolarSystems') AND name = 'IsOverloaded')
+            BEGIN
+                ALTER TABLE SolarSystems ADD IsOverloaded BIT NOT NULL DEFAULT 0;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('SolarSystems') AND name = 'CustomerPassword')
+            BEGIN
+                ALTER TABLE SolarSystems ADD CustomerPassword NVARCHAR(200) NULL;
+            END
+
             IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'AdminAccounts')
             BEGIN
                 CREATE TABLE AdminAccounts (

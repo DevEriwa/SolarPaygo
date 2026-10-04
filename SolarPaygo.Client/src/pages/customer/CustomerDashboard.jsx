@@ -1,6 +1,6 @@
 ﻿import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Zap, Activity, Wallet, Coins, Copy, CheckCircle2, History, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
+import { Zap, Activity, Wallet, Coins, Copy, CheckCircle2, History, CheckCircle, XCircle, AlertCircle, Key, Power, AlertTriangle, Lock } from 'lucide-react';
 import { BASE_URL } from '../../config';
 import * as signalR from '@microsoft/signalr';
 
@@ -12,6 +12,80 @@ export default function CustomerDashboard() {
   const [simulateMessage, setSimulateMessage] = useState(null);
   const [redeemLoading, setRedeemLoading] = useState(false);
   const [redeemResult, setRedeemResult] = useState(null);
+
+  // Overload reset state
+  const [resetOverloadLoading, setResetOverloadLoading] = useState(false);
+  const [resetOverloadResult, setResetOverloadResult] = useState(null);
+
+  // Change password state
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [passwordResult, setPasswordResult] = useState(null);
+
+  const handleResetOverload = async () => {
+    setResetOverloadLoading(true);
+    setResetOverloadResult(null);
+    try {
+      const activeToken = localStorage.getItem('token');
+      const response = await fetch(`${BASE_URL}/dashboard/my-system/reset-overload`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${activeToken}`, 'Content-Type': 'application/json' }
+      });
+      const resData = await response.json();
+      if (response.ok) {
+        setResetOverloadResult({ type: 'success', text: resData.message });
+        refetch();
+      } else {
+        setResetOverloadResult({ type: 'error', text: resData.message || 'Failed to switch on power.' });
+      }
+    } catch {
+      setResetOverloadResult({ type: 'error', text: 'Network error communicating with the server.' });
+    } finally {
+      setResetOverloadLoading(false);
+    }
+  };
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+    if (newPassword !== confirmPassword) {
+      setPasswordResult({ type: 'error', text: 'New password and confirm password do not match.' });
+      return;
+    }
+    if (newPassword.length < 4) {
+      setPasswordResult({ type: 'error', text: 'Password must be at least 4 characters long.' });
+      return;
+    }
+    setPasswordLoading(true);
+    setPasswordResult(null);
+    try {
+      const activeToken = localStorage.getItem('token');
+      const res = await fetch(`${BASE_URL}/auth/customer/change-password`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${activeToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword, newPassword })
+      });
+      const resData = await res.json();
+      if (res.ok) {
+        setPasswordResult({ type: 'success', text: resData.message });
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+        setTimeout(() => {
+          setPasswordModalOpen(false);
+          setPasswordResult(null);
+        }, 2200);
+      } else {
+        setPasswordResult({ type: 'error', text: resData.message || 'Failed to change password.' });
+      }
+    } catch {
+      setPasswordResult({ type: 'error', text: 'Network error updating password.' });
+    } finally {
+      setPasswordLoading(false);
+    }
+  };
 
   const token = localStorage.getItem('token');
 
@@ -190,8 +264,8 @@ export default function CustomerDashboard() {
           <p className="subtitle">{system.hardwareId}</p>
         </div>
 
-        {/* Meter Status Badge */}
-        <div>
+        {/* Meter Status Badge & Password Action */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           {(system.stronMeterId || system.StronMeterId || system.hardwareId) && (
             <div style={{
               display: 'inline-flex',
@@ -215,8 +289,91 @@ export default function CustomerDashboard() {
               {isMeterOnline ? 'Meter Online' : 'Meter Offline'}
             </div>
           )}
+
+          <button
+            onClick={() => setPasswordModalOpen(true)}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '8px 16px',
+              borderRadius: '999px',
+              background: 'rgba(255, 255, 255, 0.05)',
+              border: '1px solid var(--border-color)',
+              color: 'var(--text-main)',
+              fontSize: '0.85rem',
+              fontWeight: 600,
+              cursor: 'pointer'
+            }}
+          >
+            <Key size={14} color="#f59e0b" /> Change Password
+          </button>
         </div>
       </div>
+
+      {/* Overload Alert Card & Switch ON Button */}
+      {(system.isOverloaded || system.IsOverloaded || (system.relayState === '0' && (system.availableUnits > 0 || system.prepaidNairaBalance > 0))) && (
+        <div style={{
+          background: 'rgba(245, 158, 11, 0.12)',
+          border: '1px solid rgba(245, 158, 11, 0.35)',
+          borderRadius: '12px',
+          padding: '16px 20px',
+          marginBottom: '24px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '16px',
+          flexWrap: 'wrap'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', maxWidth: '750px' }}>
+            <AlertTriangle size={30} color="#f59e0b" style={{ flexShrink: 0 }} />
+            <div>
+              <div style={{ fontWeight: 700, color: '#f59e0b', fontSize: '1rem' }}>
+                System Overload Protection Activated
+              </div>
+              <div style={{ fontSize: '0.86rem', color: '#cbd5e1', marginTop: '2px', lineHeight: 1.4 }}>
+                Power was automatically switched OFF because total electrical draw exceeded your {system.maxLoadWatts || 2000} W limit. Please unplug heavy appliances (heaters, boiling rings, irons), then click Switch Power Back ON below.
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={handleResetOverload}
+            disabled={resetOverloadLoading}
+            style={{
+              background: '#f59e0b',
+              color: '#000',
+              border: 'none',
+              borderRadius: '8px',
+              padding: '11px 22px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '8px',
+              fontSize: '0.9rem',
+              boxShadow: '0 4px 14px rgba(245, 158, 11, 0.3)'
+            }}
+          >
+            <Power size={16} />
+            {resetOverloadLoading ? 'Checking & Switching ON...' : 'Switch Power Back ON'}
+          </button>
+        </div>
+      )}
+
+      {resetOverloadResult && (
+        <div style={{
+          background: resetOverloadResult.type === 'success' ? 'rgba(34, 197, 94, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+          border: `1px solid ${resetOverloadResult.type === 'success' ? 'rgba(34, 197, 94, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
+          borderRadius: '8px',
+          padding: '12px 18px',
+          marginBottom: '20px',
+          color: resetOverloadResult.type === 'success' ? 'var(--success)' : 'var(--danger)',
+          fontSize: '0.9rem',
+          fontWeight: 600
+        }}>
+          {resetOverloadResult.text}
+        </div>
+      )}
 
       <div className="stats-grid">
         <div className="stat-card">
@@ -407,6 +564,158 @@ export default function CustomerDashboard() {
           </div>
         </div>
       </div>
+
+      {/* Change Password Modal */}
+      {passwordModalOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.75)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10000,
+          padding: '20px'
+        }}>
+          <div style={{
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '16px',
+            padding: '28px',
+            width: '100%',
+            maxWidth: '420px',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.6)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Key size={20} color="#f59e0b" />
+                <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'white', margin: 0 }}>Change Login Password</h3>
+              </div>
+              <button
+                onClick={() => { setPasswordModalOpen(false); setPasswordResult(null); }}
+                style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '1.4rem', cursor: 'pointer', lineHeight: 1 }}
+              >
+                ×
+              </button>
+            </div>
+
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '18px' }}>
+              Default password is your Hardware ID (e.g. <code>{system.hardwareId}</code>). Enter your current password and choose a new one.
+            </p>
+
+            {passwordResult && (
+              <div style={{
+                background: passwordResult.type === 'success' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                border: `1px solid ${passwordResult.type === 'success' ? 'rgba(34, 197, 94, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
+                color: passwordResult.type === 'success' ? 'var(--success)' : 'var(--danger)',
+                padding: '10px 14px',
+                borderRadius: '8px',
+                fontSize: '0.85rem',
+                marginBottom: '16px'
+              }}>
+                {passwordResult.text}
+              </div>
+            )}
+
+            <form onSubmit={handleChangePassword}>
+              <div style={{ marginBottom: '14px' }}>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '6px', fontWeight: 600 }}>Current Password</label>
+                <input
+                  type="password"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  placeholder="Enter current password or Hardware ID"
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '10px 14px',
+                    borderRadius: '8px',
+                    background: 'rgba(255,255,255,0.05)',
+                    border: '1px solid var(--border-color)',
+                    color: 'white',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+
+              <div style={{ marginBottom: '14px' }}>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '6px', fontWeight: 600 }}>New Password</label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="At least 4 characters"
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '10px 14px',
+                    borderRadius: '8px',
+                    background: 'rgba(255,255,255,0.05)',
+                    border: '1px solid var(--border-color)',
+                    color: 'white',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+
+              <div style={{ marginBottom: '22px' }}>
+                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '6px', fontWeight: 600 }}>Confirm New Password</label>
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Re-type new password"
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '10px 14px',
+                    borderRadius: '8px',
+                    background: 'rgba(255,255,255,0.05)',
+                    border: '1px solid var(--border-color)',
+                    color: 'white',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  onClick={() => { setPasswordModalOpen(false); setPasswordResult(null); }}
+                  style={{
+                    padding: '9px 18px',
+                    borderRadius: '8px',
+                    background: 'transparent',
+                    border: '1px solid var(--border-color)',
+                    color: 'var(--text-muted)',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={passwordLoading}
+                  style={{
+                    padding: '9px 20px',
+                    borderRadius: '8px',
+                    background: 'var(--primary-accent)',
+                    border: 'none',
+                    color: '#000',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                >
+                  {passwordLoading ? 'Saving...' : 'Update Password'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

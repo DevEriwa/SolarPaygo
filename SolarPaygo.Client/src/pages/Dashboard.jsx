@@ -81,6 +81,31 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
   const [deviceGroups, setDeviceGroups] = useState([]);
   const [selectedGroupTab, setSelectedGroupTab] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
+  const [adminResetLoading, setAdminResetLoading] = useState({});
+  const [overloadNotice, setOverloadNotice] = useState(null);
+
+  const handleAdminResetOverload = async (sysId) => {
+    setAdminResetLoading(prev => ({ ...prev, [sysId]: true }));
+    setOverloadNotice(null);
+    try {
+      const activeToken = localStorage.getItem('token');
+      const res = await fetch(`${BASE_URL}/dashboard/systems/${sysId}/reset-overload`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${activeToken}`, 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setOverloadNotice({ type: 'success', text: data.message });
+        refetch();
+      } else {
+        setOverloadNotice({ type: 'error', text: data.message || 'Failed to switch on power.' });
+      }
+    } catch {
+      setOverloadNotice({ type: 'error', text: 'Network error switching on meter.' });
+    } finally {
+      setAdminResetLoading(prev => ({ ...prev, [sysId]: false }));
+    }
+  };
   const [regError, setRegError] = useState(null);
   const [regSuccess, setRegSuccess] = useState(false);
   const [regLoading, setRegLoading] = useState(false);
@@ -908,6 +933,23 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
             </div>
           )}
 
+          {overloadNotice && (
+            <div style={{
+              background: overloadNotice.type === 'success' ? 'rgba(34, 197, 94, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+              border: `1px solid ${overloadNotice.type === 'success' ? 'rgba(34, 197, 94, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
+              color: overloadNotice.type === 'success' ? 'var(--success)' : 'var(--danger)',
+              borderRadius: '8px',
+              padding: '10px 16px',
+              marginBottom: '14px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              fontSize: '0.88rem'
+            }}>
+              <span>{overloadNotice.type === 'success' ? '✅' : '⚠️'} {overloadNotice.text}</span>
+              <button onClick={() => setOverloadNotice(null)} style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '1.2rem', lineHeight: 1 }}>×</button>
+            </div>
+          )}
           <div className="table-responsive">
             <table className="data-table">
               <thead>
@@ -995,10 +1037,23 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                               }}></span>
                               {(sys.meterOnline || sys.MeterOnline) ? 'Online' : 'Offline'}
                             </span>
-                            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                               <span style={{ color: sys.relayState === '1' ? 'var(--success)' : 'var(--danger)' }}>
                                 {sys.relayState === '1' ? '⚡ Relay ON' : '⭕ Relay Cut'}
                               </span>
+                              {(sys.isOverloaded || sys.IsOverloaded) && (
+                                <span style={{
+                                  background: 'rgba(245, 158, 11, 0.18)',
+                                  color: '#f59e0b',
+                                  padding: '1px 6px',
+                                  borderRadius: '6px',
+                                  fontSize: '0.7rem',
+                                  fontWeight: 700,
+                                  border: '1px solid rgba(245, 158, 11, 0.4)'
+                                }}>
+                                  ⚠️ Overloaded
+                                </span>
+                              )}
                             </div>
                           </div>
                         </td>
@@ -1034,17 +1089,45 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
 
                         {/* Actions */}
                         <td>
-                          <button 
-                            className="action-btn" 
-                            style={{ 
-                              padding: '6px 12px', 
-                              background: isExpanded ? 'var(--primary-accent)' : 'rgba(255,255,255,0.03)', 
-                              borderColor: isExpanded ? 'var(--primary-accent)' : 'var(--border-color)', 
-                              color: isExpanded ? 'var(--bg-dark)' : 'white' 
-                            }}
-                          >
-                            {isExpanded ? 'Hide History' : 'View Profile & History'}
-                          </button>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            <button 
+                              className="action-btn" 
+                              style={{ 
+                                padding: '6px 12px', 
+                                background: isExpanded ? 'var(--primary-accent)' : 'rgba(255,255,255,0.03)', 
+                                borderColor: isExpanded ? 'var(--primary-accent)' : 'var(--border-color)', 
+                                color: isExpanded ? 'var(--bg-dark)' : 'white' 
+                              }}
+                            >
+                              {isExpanded ? 'Hide History' : 'View Profile & History'}
+                            </button>
+
+                            {(sys.isOverloaded || sys.IsOverloaded || sys.relayState === '0') && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleAdminResetOverload(sys.id);
+                                }}
+                                disabled={adminResetLoading[sys.id]}
+                                className="action-btn"
+                                style={{
+                                  padding: '5px 10px',
+                                  background: 'rgba(245, 158, 11, 0.15)',
+                                  borderColor: 'rgba(245, 158, 11, 0.5)',
+                                  color: '#f59e0b',
+                                  fontWeight: 600,
+                                  fontSize: '0.75rem',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  gap: '4px'
+                                }}
+                              >
+                                <Power size={12} />
+                                {adminResetLoading[sys.id] ? 'Switching...' : 'Switch Power ON'}
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
 

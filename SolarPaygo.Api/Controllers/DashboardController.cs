@@ -78,7 +78,7 @@ namespace SolarPaygo.Api.Controllers
                 s.PrepaidNairaBalance, s.PendingWalletBalance, s.CumulativeKwhConsumed, s.CumulativeKwhBought,
                 s.LastSyncTime, s.LastSyncKwh, s.MaxLoadWatts,
                 s.DailyKwhConsumed, s.DailyTimeActiveHours, s.DailyAmountCharged,
-                s.Voltage, s.Current, s.Power, s.RelayState, s.CoverState,
+                s.Voltage, s.Current, s.Power, s.RelayState, s.CoverState, s.IsOverloaded,
                 s.GeneratorCapacity,
                 s.PricePlanId,
                 PricePlan = s.PricePlan == null ? null : new {
@@ -176,6 +176,7 @@ namespace SolarPaygo.Api.Controllers
                 _logger.LogWarning("[Overload] System {Id} exceeded {Max}W. Current Power: {Power}W. Locking system.", sys.Id, sys.MaxLoadWatts, sys.Power);
                 sys.Status = "Locked";
                 sys.RelayState = "0";
+                sys.IsOverloaded = true;
                 await _vendingService.SetRemoteSwitchAsync(sys.StronMeterId, turnOn: false);
                 return true; // Meter was reachable — relay cut due to overload
             }
@@ -296,7 +297,7 @@ namespace SolarPaygo.Api.Controllers
                     system.PendingWalletBalance, system.CumulativeKwhConsumed, system.CumulativeKwhBought,
                     system.LastSyncTime, system.LastSyncKwh, system.MaxLoadWatts,
                     system.DailyKwhConsumed, system.DailyTimeActiveHours, system.DailyAmountCharged,
-                    system.Voltage, system.Current, system.Power, system.RelayState, system.CoverState,
+                    system.Voltage, system.Current, system.Power, system.RelayState, system.CoverState, system.IsOverloaded,
                     system.GeneratorCapacity, system.PricePlanId, system.DeviceGroupId,
                     PricePlan = system.PricePlan == null ? null : new {
                         system.PricePlan.Id, system.PricePlan.Band, system.PricePlan.Name,
@@ -387,7 +388,7 @@ namespace SolarPaygo.Api.Controllers
                     system.PendingWalletBalance, system.CumulativeKwhConsumed, system.CumulativeKwhBought,
                     system.LastSyncTime, system.LastSyncKwh, system.MaxLoadWatts,
                     system.DailyKwhConsumed, system.DailyTimeActiveHours, system.DailyAmountCharged,
-                    system.Voltage, system.Current, system.Power, system.RelayState, system.CoverState,
+                    system.Voltage, system.Current, system.Power, system.RelayState, system.CoverState, system.IsOverloaded,
                     system.GeneratorCapacity, system.PricePlanId, system.DeviceGroupId,
                     PricePlan = system.PricePlan == null ? null : new {
                         system.PricePlan.Id, system.PricePlan.Band, system.PricePlan.Name,
@@ -780,10 +781,106 @@ namespace SolarPaygo.Api.Controllers
 
             return Ok(system);
         }
+        [Authorize(Roles = "Customer")]
+        [HttpPost("my-system/reset-overload")]
+        public async Task<IActionResult> CustomerResetOverload()
+        {
+            var systemIdClaim = User.Claims.FirstOrDefault(c => c.Type == "SystemId")?.Value;
+            if (string.IsNullOrEmpty(systemIdClaim) || !int.TryParse(systemIdClaim, out int systemId))
+            {
+                return Unauthorized();
+            }
+
+            return await PerformOverloadReset(systemId);
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpPost("systems/{id}/reset-overload")]
+        public async Task<IActionResult> AdminResetOverload(int id)
+        {
+            return await PerformOverloadReset(id);
+        }
+
+        private async Task<IActionResult> PerformOverloadReset(int systemId)
+        {
+            var system = await _context.SolarSystems.FindAsync(systemId);
+            if (system == null) return NotFound(new { message = "Solar system not found." });
+
+            // Check 1: Must have energy units in meter
+            if (system.AvailableUnits <= 0 && system.PrepaidNairaBalance <= 0)
+            {
+                return BadRequest(new { 
+                    success = false, 
+                    message = "Cannot switch ON: Your meter has 0 available units. Please recharge your account first." 
+                });
+            }
+
+            if (string.IsNullOrWhiteSpace(system.StronMeterId))
+            {
+                return BadRequest(new { success = false, message = "No meter is linked to this system." });
+            }
+
+            // Check 2: Query live meter status to verify overload is not still plugged in
+            try
+            {
+                var liveStatus = await _vendingService.QueryMeterStatusAsync(system.StronMeterId, DateTime.UtcNow);
+                if (liveStatus != null)
+                {
+                    system.Power = liveStatus.Power;
+                    system.Voltage = liveStatus.Voltage;
+                    system.Current = liveStatus.Current;
+                    system.LastSyncTime = DateTime.UtcNow;
+
+                    if (liveStatus.Power > system.MaxLoadWatts)
+                    {
+                        system.IsOverloaded = true;
+                        system.RelayState = "0";
+                        system.Status = "Locked";
+                        await _context.SaveChangesAsync();
+
+                        return BadRequest(new { 
+                            success = false, 
+                            message = $"Cannot switch ON: Overload is still active! Current draw is {liveStatus.Power:F0}W which exceeds your {system.MaxLoadWatts}W limit. Please disconnect heavy appliances (heaters, boiling rings, etc.) and try again." 
+                        });
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to query live meter status before overload reset for meter {MeterId}", system.StronMeterId);
+            }
+
+            // Check 3: Turn relay back ON via Stron API
+            bool success = await _vendingService.SetRemoteSwitchAsync(system.StronMeterId, turnOn: true);
+            if (!success)
+            {
+                return BadRequest(new { 
+                    success = false, 
+                    message = "Switch command sent, but meter did not confirm. Please ensure the meter is powered and has cellular reception, then try again." 
+                });
+            }
+
+            system.Status = "Active";
+            system.RelayState = "1";
+            system.IsOverloaded = false;
+            await _context.SaveChangesAsync();
+
+            return Ok(new { 
+                success = true, 
+                message = "Power switched ON successfully! Relay is closed and electricity is restored.",
+                system = new {
+                    system.Id,
+                    system.Status,
+                    system.RelayState,
+                    system.IsOverloaded
+                }
+            });
+        }
     }
 
     public class SendTokenRequest
     {
         public string Token { get; set; } = string.Empty;
+
     }
 }

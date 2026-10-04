@@ -58,6 +58,12 @@ namespace SolarPaygo.Api.Models
         // True once a low-balance alert email has been sent for the CURRENT low-balance
         // episode. Reset to false once the balance recovers, so the next dip sends a fresh
         // alert instead of staying silent forever or re-sending every poll cycle.
+        // Tracks if the system was tripped by power overload
+        public bool IsOverloaded { get; set; } = false;
+
+        // Custom customer login password (optional; falls back to HardwareId if null/empty)
+        public string? CustomerPassword { get; set; }
+
         public bool LowBalanceNotified { get; set; } = false;
 
         // Assigned Device Group/Tab. Null means Ungrouped / default view.

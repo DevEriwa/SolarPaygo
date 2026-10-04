@@ -1,3 +1,4 @@
+using SolarPaygo.Api.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -70,6 +71,7 @@ namespace SolarPaygo.Api.Services
                 using var scope = _scopeFactory.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<SolarDbContext>();
                 var vendingService = scope.ServiceProvider.GetRequiredService<IStronVendingService>();
+                var emailService = scope.ServiceProvider.GetService<IEmailService>();
 
                 // Select systems that are Active or Locked (skip Disabled systems to prevent unnecessary network requests)
                 var systems = await db.SolarSystems
@@ -135,6 +137,64 @@ namespace SolarPaygo.Api.Services
                                 sys.Status = "Active";
                                 sys.RelayState = "1";
                                 await vendingService.SetRemoteSwitchAsync(sys.StronMeterId, turnOn: true);
+                        // Auto-Vend from Wallet if meter is back online and wallet balance qualifies
+                        decimal rate = PricingEngine.ResolveRate(sys);
+                        decimal minThreshold = 0.1m * rate;
+                        if (sys.PendingWalletBalance >= minThreshold)
+                        {
+                            decimal unitsToReceive = Math.Round(sys.PendingWalletBalance / rate, 1, MidpointRounding.AwayFromZero);
+                            if (unitsToReceive < 0.1m) unitsToReceive = 0.1m;
+
+                            _logger.LogInformation("[TelemetrySync] Meter {MeterId} is back ONLINE with wallet balance ₦{Bal}. Auto-vending {Units} kWh...", sys.StronMeterId, sys.PendingWalletBalance, unitsToReceive);
+                            var vendResult = await vendingService.GenerateVendingTokenAsync(sys.StronMeterId, unitsToReceive, isVendByUnit: true);
+                            if (vendResult != null && !string.IsNullOrWhiteSpace(vendResult.Token))
+                            {
+                                string stsToken = vendResult.Token;
+                                decimal actualUnitsVended = vendResult.Units > 0 ? vendResult.Units : unitsToReceive;
+                                bool otaSuccess = await vendingService.SendTokenRemotelyAsync(sys.StronMeterId, stsToken);
+
+                                decimal usedAmount = Math.Round(actualUnitsVended * rate, 2);
+                                decimal walletAfter = Math.Max(0m, sys.PendingWalletBalance - usedAmount);
+
+                                var autoTx = new Transaction
+                                {
+                                    SolarSystemId = sys.Id,
+                                    AmountPaid = usedAmount,
+                                    UnitsAdded = actualUnitsVended,
+                                    UsedAmount = usedAmount,
+                                    AddedToWallet = 0m,
+                                    WalletBalanceAfter = walletAfter,
+                                    RateAtTime = rate,
+                                    Status = "Completed",
+                                    StsToken = stsToken,
+                                    PaymentReference = "AUTO_WALLET_" + DateTime.UtcNow.ToString("yyyyMMddHHmmss"),
+                                    TransactionDate = DateTime.UtcNow,
+                                    IsDeliveredToMeter = otaSuccess
+                                };
+
+                                sys.AvailableUnits += actualUnitsVended;
+                                sys.CumulativeKwhBought += actualUnitsVended;
+                                sys.PendingWalletBalance = walletAfter;
+
+                                if (sys.AvailableUnits > 0 || sys.PrepaidNairaBalance > 0)
+                                {
+                                    sys.Status = "Active";
+                                    sys.RelayState = "1";
+                                    await vendingService.SetRemoteSwitchAsync(sys.StronMeterId, turnOn: true);
+                                }
+
+                                db.Transactions.Add(autoTx);
+                                _logger.LogInformation("[TelemetrySync] Auto-vended {Units} kWh from wallet for online meter {MeterId}. OTA: {Ota}", actualUnitsVended, sys.StronMeterId, otaSuccess);
+
+                                if (!string.IsNullOrWhiteSpace(sys.CustomerEmail))
+                                {
+                                    string subj = "SolarPayGo - Meter Online: Units Credited";
+                                    string body = $"<p>Dear {sys.OwnerName ?? "Customer"},</p><p>Your meter is now online. Units purchased from your wallet have been credited:</p><p><strong>Units Added:</strong> {actualUnitsVended:F2} kWh</p><p><strong>STS Token:</strong> {stsToken}</p>";
+                                    try { if (emailService != null) await emailService.SendEmailAsync(sys.CustomerEmail, subj, body); } catch { }
+                                }
+                            }
+                        }
+
 
                                 try
                                 {

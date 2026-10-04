@@ -65,10 +65,9 @@ namespace SolarPaygo.Api.Controllers
                 return Ok(new { Token = GenerateJwtToken("admin", "Admin", 0) });
             }
 
-            // Customer Check: Username = Email, Password = HardwareId
+            // Customer Check: Username = Email
             var system = await _context.SolarSystems.FirstOrDefaultAsync(s => 
-                s.CustomerEmail != null && s.CustomerEmail.ToLower() == username.ToLower() && 
-                s.HardwareId == password);
+                s.CustomerEmail != null && s.CustomerEmail.ToLower() == username.ToLower());
                 
             if (system != null)
             {
@@ -76,7 +75,18 @@ namespace SolarPaygo.Api.Controllers
                 {
                     return Unauthorized("This customer account has been deactivated.");
                 }
-                return Ok(new { Token = GenerateJwtToken(system.CustomerEmail ?? string.Empty, "Customer", system.Id) });
+
+                // Password verification: custom password if set, otherwise fallback to HardwareId
+                bool passwordMatches = !string.IsNullOrEmpty(system.CustomerPassword)
+                    ? string.Equals(system.CustomerPassword, password, StringComparison.Ordinal)
+                    : string.Equals(system.HardwareId, password, StringComparison.OrdinalIgnoreCase);
+
+                if (passwordMatches)
+                {
+                    return Ok(new { Token = GenerateJwtToken(system.CustomerEmail ?? string.Empty, "Customer", system.Id) });
+                }
+
+                return Unauthorized("Invalid credentials");
             }
 
             return Unauthorized("Invalid credentials");
@@ -118,5 +128,57 @@ namespace SolarPaygo.Api.Controllers
             return system == null ? NotFound() : Ok(system);
         }
 
+        [Authorize(Roles = "Customer")]
+        [HttpPost("customer/change-password")]
+        public async Task<IActionResult> ChangeCustomerPassword([FromBody] ChangeCustomerPasswordRequest request)
+        {
+            var systemIdClaim = User.Claims.FirstOrDefault(c => c.Type == "SystemId")?.Value;
+            if (string.IsNullOrEmpty(systemIdClaim) || !int.TryParse(systemIdClaim, out int systemId))
+            {
+                return Unauthorized();
+            }
+
+            var system = await _context.SolarSystems.FindAsync(systemId);
+            if (system == null) return NotFound("Account not found.");
+
+            if (string.IsNullOrWhiteSpace(request.NewPassword) || request.NewPassword.Length < 4)
+            {
+                return BadRequest(new { message = "New password must be at least 4 characters long." });
+            }
+
+            // Verify current password
+            bool currentMatches = !string.IsNullOrEmpty(system.CustomerPassword)
+                ? string.Equals(system.CustomerPassword, request.CurrentPassword, StringComparison.Ordinal)
+                : string.Equals(system.HardwareId, request.CurrentPassword, StringComparison.OrdinalIgnoreCase);
+
+            if (!currentMatches)
+            {
+                return BadRequest(new { message = "Current password is incorrect." });
+            }
+
+            system.CustomerPassword = request.NewPassword.Trim();
+            await _context.SaveChangesAsync();
+
+            return Ok(new { message = "Password changed successfully! Please use your new password next time you log in." });
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpPost("customer/{id}/reset-password")]
+        public async Task<IActionResult> AdminResetCustomerPassword(int id)
+        {
+            var system = await _context.SolarSystems.FindAsync(id);
+            if (system == null) return NotFound("Customer system not found.");
+
+            system.CustomerPassword = null; // resets to default HardwareId
+            await _context.SaveChangesAsync();
+
+            return Ok(new { message = $"Password has been reset to default ({system.HardwareId})." });
+        }
+
+        public class ChangeCustomerPasswordRequest
+        {
+            public string CurrentPassword { get; set; } = string.Empty;
+            public string NewPassword { get; set; } = string.Empty;
+        }
     }
 }

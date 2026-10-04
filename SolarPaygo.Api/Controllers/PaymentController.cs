@@ -319,6 +319,62 @@ namespace SolarPaygo.Api.Controllers
             // PrepaidNairaBalance so repeated payments don't re-vend off the full historical total.
             system.PendingWalletBalance += amountPaid;
 
+            // Check if meter is online:
+            bool isMeterOnline = system.LastSyncTime.HasValue 
+                && (DateTime.UtcNow - system.LastSyncTime.Value).TotalMinutes < 15;
+
+            if (!isMeterOnline)
+            {
+                // Meter is offline: deposit 100% of recharge into wallet. Do NOT vend yet.
+                decimal currentRate = PricingEngine.ResolveRate(system);
+                var offlineTx = new Transaction
+                {
+                    SolarSystemId = system.Id,
+                    AmountPaid = amountPaid,
+                    UnitsAdded = 0m,
+                    UsedAmount = 0m,
+                    AddedToWallet = amountPaid,
+                    WalletBalanceAfter = system.PendingWalletBalance,
+                    RateAtTime = currentRate,
+                    Status = "In Wallet (Meter Offline)",
+                    StsToken = null,
+                    PaymentReference = reference,
+                    TransactionDate = DateTime.UtcNow,
+                    IsDeliveredToMeter = false
+                };
+
+                _context.Transactions.Add(offlineTx);
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation("[ProcessPayment] Meter {MeterId} is OFFLINE. Deposited full payment ₦{Amount} into wallet. Pending wallet balance: ₦{Bal}.",
+                    system.StronMeterId, amountPaid, system.PendingWalletBalance);
+
+                // Notifications
+                if (!string.IsNullOrWhiteSpace(system.CustomerEmail))
+                {
+                    string subject = "SolarPayGo Payment Received - Deposited to Wallet";
+                    string body = $@"
+                        <h3>Payment Received</h3>
+                        <p>Dear {system.OwnerName ?? "Customer"},</p>
+                        <p>Your payment of ₦{amountPaid:N2} has been successfully credited to your wallet.</p>
+                        <p><strong>Wallet Balance:</strong> ₦{system.PendingWalletBalance:N2}</p>
+                        <p><em>Your meter is currently offline. Units will automatically be credited to your meter as soon as it reconnects to the network.</em></p>
+                        <p>Thank you for using SolarPayGo!</p>
+                    ";
+                    try { await _emailService.SendEmailAsync(system.CustomerEmail, subject, body); }
+                    catch (Exception ex) { _logger.LogError(ex, "Failed to send email notification."); }
+                }
+
+                if (!string.IsNullOrWhiteSpace(system.CustomerPhone))
+                {
+                    string sms = $"SolarPayGo: Payment of N{amountPaid} received and added to wallet (Bal: N{system.PendingWalletBalance:N2}). Meter is offline; tokens will auto-deliver once meter is online.";
+                    try { await _smsService.SendSmsAsync(system.CustomerPhone, sms); }
+                    catch (Exception ex) { _logger.LogError(ex, "Failed to send SMS notification."); }
+                }
+
+                return (true, $"Payment of ₦{amountPaid:N2} added to your wallet (Total: ₦{system.PendingWalletBalance:N2}). Meter is offline; units will be auto-delivered once meter connects.", offlineTx, system);
+            }
+
             var vendOutcome = await TryVendFromWalletAsync(system, reference, amountPaidThisTransaction: amountPaid);
 
             if (vendOutcome.Outcome == WalletVendOutcome.VendingServiceUnavailable)
