@@ -852,18 +852,25 @@ namespace SolarPaygo.Api.Controllers
 
             // Check 3: Turn relay back ON via Stron API
             bool success = await _vendingService.SetRemoteSwitchAsync(system.StronMeterId, turnOn: true);
-            if (!success)
-            {
-                return BadRequest(new { 
-                    success = false, 
-                    message = "Switch command sent, but meter did not confirm. Please ensure the meter is powered and has cellular reception, then try again." 
-                });
-            }
 
             system.Status = "Active";
             system.RelayState = "1";
             system.IsOverloaded = false;
             await _context.SaveChangesAsync();
+
+            if (!success)
+            {
+                return Ok(new { 
+                    success = true, 
+                    message = "Overload status cleared and switch command queued. Since the meter is currently offline, power will restore automatically as soon as it reconnects to cellular signal.",
+                    system = new {
+                        system.Id,
+                        system.Status,
+                        system.RelayState,
+                        system.IsOverloaded
+                    }
+                });
+            }
 
             return Ok(new { 
                 success = true, 

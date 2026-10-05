@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect } from 'react';
-import { Search, Lock, Unlock, MinusCircle, CreditCard, Plus, Activity, User, ShieldAlert, BadgeCheck, Phone, Mail, FileText, Coins, Power } from 'lucide-react';
+import { Search, Lock, Unlock, MinusCircle, CreditCard, Plus, Activity, User, ShieldAlert, BadgeCheck, Phone, Mail, FileText, Coins, Power, Key } from 'lucide-react';
 import { BASE_URL } from '../config';
 
 export default function Dashboard({ dashboardData, loading, refreshData, pricePlans = [] }) {
@@ -104,6 +104,36 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
       setOverloadNotice({ type: 'error', text: 'Network error switching on meter.' });
     } finally {
       setAdminResetLoading(prev => ({ ...prev, [sysId]: false }));
+    }
+  };
+  const [adminPasswordResetLoading, setAdminPasswordResetLoading] = useState({});
+  const [adminPasswordNotice, setAdminPasswordNotice] = useState(null);
+
+  const handleAdminResetPassword = async (sys) => {
+    const customerName = sys.ownerName || sys.OwnerName || 'Customer';
+    const hardwareId = sys.hardwareId || sys.HardwareId || 'N/A';
+    if (!window.confirm(`Are you sure you want to reset the login password for ${customerName}?\n\nTheir password will be reset to their default Hardware ID (${hardwareId}).`)) {
+      return;
+    }
+
+    setAdminPasswordResetLoading(prev => ({ ...prev, [sys.id]: true }));
+    setAdminPasswordNotice(null);
+    try {
+      const activeToken = localStorage.getItem('token');
+      const res = await fetch(`${BASE_URL}/auth/admin-reset-customer-password/${sys.id}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${activeToken}`, 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setAdminPasswordNotice({ type: 'success', text: data.message || `Password for ${customerName} has been reset to default (${hardwareId}).` });
+      } else {
+        setAdminPasswordNotice({ type: 'error', text: data.message || 'Failed to reset customer password.' });
+      }
+    } catch {
+      setAdminPasswordNotice({ type: 'error', text: 'Network error resetting customer password.' });
+    } finally {
+      setAdminPasswordResetLoading(prev => ({ ...prev, [sys.id]: false }));
     }
   };
   const [regError, setRegError] = useState(null);
@@ -950,6 +980,24 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
               <button onClick={() => setOverloadNotice(null)} style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '1.2rem', lineHeight: 1 }}>×</button>
             </div>
           )}
+
+          {adminPasswordNotice && (
+            <div style={{
+              background: adminPasswordNotice.type === 'success' ? 'rgba(34, 197, 94, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+              border: `1px solid ${adminPasswordNotice.type === 'success' ? 'rgba(34, 197, 94, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
+              color: adminPasswordNotice.type === 'success' ? 'var(--success)' : 'var(--danger)',
+              borderRadius: '8px',
+              padding: '10px 16px',
+              marginBottom: '14px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              fontSize: '0.88rem'
+            }}>
+              <span>{adminPasswordNotice.type === 'success' ? '🔑' : '⚠️'} {adminPasswordNotice.text}</span>
+              <button onClick={() => setAdminPasswordNotice(null)} style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '1.2rem', lineHeight: 1 }}>×</button>
+            </div>
+          )}
           <div className="table-responsive">
             <table className="data-table">
               <thead>
@@ -1102,7 +1150,7 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                               {isExpanded ? 'Hide History' : 'View Profile & History'}
                             </button>
 
-                            {(sys.isOverloaded || sys.IsOverloaded || sys.relayState === '0') && (
+                            {(sys.isOverloaded || sys.IsOverloaded || sys.relayState === '0' || sys.RelayState === '0' || !(sys.meterOnline ?? sys.MeterOnline) || sys.status === 'Locked' || sys.Status === 'Locked') && (
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -1110,6 +1158,7 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                                 }}
                                 disabled={adminResetLoading[sys.id]}
                                 className="action-btn"
+                                title="Switch meter power ON or reset overload cutoff"
                                 style={{
                                   padding: '5px 10px',
                                   background: 'rgba(245, 158, 11, 0.15)',
@@ -1127,6 +1176,31 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                                 {adminResetLoading[sys.id] ? 'Switching...' : 'Switch Power ON'}
                               </button>
                             )}
+
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleAdminResetPassword(sys);
+                              }}
+                              disabled={adminPasswordResetLoading[sys.id]}
+                              className="action-btn"
+                              title="Reset customer login password to default Hardware ID"
+                              style={{
+                                padding: '5px 10px',
+                                background: 'rgba(59, 130, 246, 0.12)',
+                                borderColor: 'rgba(59, 130, 246, 0.4)',
+                                color: '#60a5fa',
+                                fontWeight: 600,
+                                fontSize: '0.75rem',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '4px'
+                              }}
+                            >
+                              <Key size={12} />
+                              {adminPasswordResetLoading[sys.id] ? 'Resetting...' : 'Reset Password'}
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -1183,6 +1257,39 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                                     {bandAssignLoading === sys.id && (
                                       <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Saving...</span>
                                     )}
+                                  </div>
+
+                                  <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                    <strong style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Customer Login &amp; Password:</strong>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleAdminResetPassword(sys);
+                                        }}
+                                        disabled={adminPasswordResetLoading[sys.id]}
+                                        style={{
+                                          padding: '7px 14px',
+                                          borderRadius: '6px',
+                                          background: 'rgba(59, 130, 246, 0.15)',
+                                          border: '1px solid rgba(59, 130, 246, 0.5)',
+                                          color: '#93c5fd',
+                                          fontSize: '0.82rem',
+                                          fontWeight: 600,
+                                          cursor: 'pointer',
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '6px'
+                                        }}
+                                      >
+                                        <Key size={14} />
+                                        {adminPasswordResetLoading[sys.id] ? 'Resetting Password...' : `Reset Password to Default (${sys.hardwareId})`}
+                                      </button>
+                                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                                        Restores customer login password back to default Hardware ID.
+                                      </span>
+                                    </div>
                                   </div>
                                 </div>
                               </div>
