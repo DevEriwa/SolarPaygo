@@ -290,6 +290,29 @@ export default function CustomerDashboard() {
             </div>
           )}
 
+          {(system.isOverloaded || system.IsOverloaded || system.relayState === '0' || system.RelayState === '0' || !isMeterOnline || rawStatus === 'locked' || system.status === 'Locked' || system.Status === 'Locked') && (
+            <button
+              onClick={handleResetOverload}
+              disabled={resetOverloadLoading}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 16px',
+                borderRadius: '999px',
+                background: 'rgba(245, 158, 11, 0.2)',
+                border: '1px solid rgba(245, 158, 11, 0.5)',
+                color: '#f59e0b',
+                fontSize: '0.85rem',
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+              title="Switch meter power ON or reset overload"
+            >
+              <Power size={14} /> {resetOverloadLoading ? 'Switching...' : 'Switch Power ON'}
+            </button>
+          )}
+
           <button
             onClick={() => setPasswordModalOpen(true)}
             style={{
@@ -312,7 +335,7 @@ export default function CustomerDashboard() {
       </div>
 
       {/* Overload Alert Card & Switch ON Button */}
-      {(system.isOverloaded || system.IsOverloaded || (system.relayState === '0' && (system.availableUnits > 0 || system.prepaidNairaBalance > 0))) && (
+      {(system.isOverloaded || system.IsOverloaded || system.relayState === '0' || system.RelayState === '0' || !isMeterOnline || rawStatus === 'locked' || system.status === 'Locked' || system.Status === 'Locked') && (
         <div style={{
           background: 'rgba(245, 158, 11, 0.12)',
           border: '1px solid rgba(245, 158, 11, 0.35)',
@@ -329,10 +352,14 @@ export default function CustomerDashboard() {
             <AlertTriangle size={30} color="#f59e0b" style={{ flexShrink: 0 }} />
             <div>
               <div style={{ fontWeight: 700, color: '#f59e0b', fontSize: '1rem' }}>
-                System Overload Protection Activated
+                {(system.isOverloaded || system.IsOverloaded) ? 'System Overload Protection Activated' : !isMeterOnline ? 'Meter Offline / Power Check' : 'Power Cut (Relay Open)'}
               </div>
               <div style={{ fontSize: '0.86rem', color: '#cbd5e1', marginTop: '2px', lineHeight: 1.4 }}>
-                Power was automatically switched OFF because total electrical draw exceeded your {system.maxLoadWatts || 2000} W limit. Please unplug heavy appliances (heaters, boiling rings, irons), then click Switch Power Back ON below.
+                {(system.isOverloaded || system.IsOverloaded)
+                  ? `Power was automatically switched OFF because total electrical draw exceeded your ${system.maxLoadWatts || 2000} W limit. Please unplug heavy appliances (heaters, boiling rings, irons), then click Switch Power Back ON below.`
+                  : !isMeterOnline
+                    ? 'Your meter is currently offline or power relay is open. Unplug heavy appliances and click Switch Power Back ON to restore power and queue meter reconnection.'
+                    : 'Power is currently turned OFF. Please unplug any heavy appliances, then click Switch Power Back ON below.'}
               </div>
             </div>
           </div>
