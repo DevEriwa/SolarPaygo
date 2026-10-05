@@ -16,6 +16,15 @@ export default function CustomerDashboard() {
   // Overload reset state
   const [resetOverloadLoading, setResetOverloadLoading] = useState(false);
   const [resetOverloadResult, setResetOverloadResult] = useState(null);
+  const [resetCooldown, setResetCooldown] = useState(0);
+
+  useEffect(() => {
+    if (resetCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResetCooldown(prev => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resetCooldown]);
 
   // Change password state
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
@@ -26,6 +35,7 @@ export default function CustomerDashboard() {
   const [passwordResult, setPasswordResult] = useState(null);
 
   const handleResetOverload = async () => {
+    if (resetCooldown > 0) return;
     setResetOverloadLoading(true);
     setResetOverloadResult(null);
     try {
@@ -37,12 +47,15 @@ export default function CustomerDashboard() {
       const resData = await response.json();
       if (response.ok) {
         setResetOverloadResult({ type: 'success', text: resData.message });
+        setResetCooldown(30); // 30s safety cooldown to protect meter relay
         refetch();
       } else {
         setResetOverloadResult({ type: 'error', text: resData.message || 'Failed to switch on power.' });
+        setResetCooldown(10);
       }
     } catch {
       setResetOverloadResult({ type: 'error', text: 'Network error communicating with the server.' });
+      setResetCooldown(10);
     } finally {
       setResetOverloadLoading(false);
     }
@@ -233,6 +246,9 @@ export default function CustomerDashboard() {
   const isRelayOn = system.relayState === '1';
   const hasEnergy = (system.availableUnits || 0) > 0 || (system.prepaidNairaBalance || 0) > 0;
   const isMeterOnline = system.meterOnline || system.MeterOnline || (system.lastSyncTime ? (new Date() - new Date(system.lastSyncTime)) < 15 * 60 * 1000 : false);
+  const isOverloadTripped = Boolean(system.isOverloaded || system.IsOverloaded);
+  const isPowerCut = !isRelayOn || isOverloadTripped || rawStatus === 'locked' || system.status === 'Locked' || system.Status === 'Locked';
+  const shouldShowRestoreAction = isPowerCut || (!isMeterOnline && !isRelayOn);
 
   let statusText = 'Active & Powered ON';
   let statusColor = 'var(--success)';
@@ -290,26 +306,26 @@ export default function CustomerDashboard() {
             </div>
           )}
 
-          {(system.isOverloaded || system.IsOverloaded || system.relayState === '0' || system.RelayState === '0' || !isMeterOnline || rawStatus === 'locked' || system.status === 'Locked' || system.Status === 'Locked') && (
+          {shouldShowRestoreAction && hasEnergy && (
             <button
               onClick={handleResetOverload}
-              disabled={resetOverloadLoading}
+              disabled={resetOverloadLoading || resetCooldown > 0}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '6px',
                 padding: '8px 16px',
                 borderRadius: '999px',
-                background: 'rgba(245, 158, 11, 0.2)',
-                border: '1px solid rgba(245, 158, 11, 0.5)',
-                color: '#f59e0b',
+                background: resetCooldown > 0 ? 'rgba(255, 255, 255, 0.05)' : 'rgba(245, 158, 11, 0.2)',
+                border: `1px solid ${resetCooldown > 0 ? 'var(--border-color)' : 'rgba(245, 158, 11, 0.5)'}`,
+                color: resetCooldown > 0 ? 'var(--text-muted)' : '#f59e0b',
                 fontSize: '0.85rem',
                 fontWeight: 600,
-                cursor: 'pointer'
+                cursor: resetCooldown > 0 ? 'not-allowed' : 'pointer'
               }}
               title="Switch meter power ON or reset overload"
             >
-              <Power size={14} /> {resetOverloadLoading ? 'Switching...' : 'Switch Power ON'}
+              <Power size={14} /> {resetOverloadLoading ? 'Switching...' : resetCooldown > 0 ? `Wait ${resetCooldown}s` : 'Switch Power ON'}
             </button>
           )}
 
@@ -334,11 +350,11 @@ export default function CustomerDashboard() {
         </div>
       </div>
 
-      {/* Overload Alert Card & Switch ON Button */}
-      {(system.isOverloaded || system.IsOverloaded || system.relayState === '0' || system.RelayState === '0' || !isMeterOnline || rawStatus === 'locked' || system.status === 'Locked' || system.Status === 'Locked') && (
+      {/* Power Cut / Overload / Reconnection Alert Banner */}
+      {shouldShowRestoreAction && (
         <div style={{
-          background: 'rgba(245, 158, 11, 0.12)',
-          border: '1px solid rgba(245, 158, 11, 0.35)',
+          background: isOverloadTripped ? 'rgba(245, 158, 11, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+          border: `1px solid ${isOverloadTripped ? 'rgba(245, 158, 11, 0.35)' : 'rgba(239, 68, 68, 0.35)'}`,
           borderRadius: '12px',
           padding: '16px 20px',
           marginBottom: '24px',
@@ -349,41 +365,73 @@ export default function CustomerDashboard() {
           flexWrap: 'wrap'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px', maxWidth: '750px' }}>
-            <AlertTriangle size={30} color="#f59e0b" style={{ flexShrink: 0 }} />
+            <AlertTriangle size={30} color={isOverloadTripped ? '#f59e0b' : '#ef4444'} style={{ flexShrink: 0 }} />
             <div>
-              <div style={{ fontWeight: 700, color: '#f59e0b', fontSize: '1rem' }}>
-                {(system.isOverloaded || system.IsOverloaded) ? 'System Overload Protection Activated' : !isMeterOnline ? 'Meter Offline / Power Check' : 'Power Cut (Relay Open)'}
+              <div style={{ fontWeight: 700, color: isOverloadTripped ? '#f59e0b' : '#ef4444', fontSize: '1rem' }}>
+                {isOverloadTripped 
+                  ? 'System Overload Protection Activated' 
+                  : !hasEnergy 
+                    ? 'Zero Balance — Power Switched OFF' 
+                    : !isMeterOnline 
+                      ? 'Meter Offline & Power Cut' 
+                      : 'Power Cut (Relay Open)'}
               </div>
               <div style={{ fontSize: '0.86rem', color: '#cbd5e1', marginTop: '2px', lineHeight: 1.4 }}>
-                {(system.isOverloaded || system.IsOverloaded)
+                {isOverloadTripped
                   ? `Power was automatically switched OFF because total electrical draw exceeded your ${system.maxLoadWatts || 2000} W limit. Please unplug heavy appliances (heaters, boiling rings, irons), then click Switch Power Back ON below.`
-                  : !isMeterOnline
-                    ? 'Your meter is currently offline or power relay is open. Unplug heavy appliances and click Switch Power Back ON to restore power and queue meter reconnection.'
-                    : 'Power is currently turned OFF. Please unplug any heavy appliances, then click Switch Power Back ON below.'}
+                  : !hasEnergy
+                    ? 'Your meter has run out of energy units. Please transfer funds to your dedicated virtual account below to recharge and restore power.'
+                    : !isMeterOnline
+                      ? 'Power is cut and the meter is currently offline. Disconnect any heavy appliances and click Switch Power Back ON to restore power and re-establish connection.'
+                      : 'Your power is currently switched OFF. Please ensure heavy loads are disconnected, then click Switch Power Back ON below.'}
               </div>
             </div>
           </div>
-          <button
-            onClick={handleResetOverload}
-            disabled={resetOverloadLoading}
-            style={{
-              background: '#f59e0b',
-              color: '#000',
-              border: 'none',
-              borderRadius: '8px',
-              padding: '11px 22px',
-              fontWeight: 700,
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '8px',
-              fontSize: '0.9rem',
-              boxShadow: '0 4px 14px rgba(245, 158, 11, 0.3)'
-            }}
-          >
-            <Power size={16} />
-            {resetOverloadLoading ? 'Checking & Switching ON...' : 'Switch Power Back ON'}
-          </button>
+          {hasEnergy ? (
+            <button
+              onClick={handleResetOverload}
+              disabled={resetOverloadLoading || resetCooldown > 0}
+              style={{
+                background: resetCooldown > 0 ? 'rgba(255, 255, 255, 0.1)' : '#f59e0b',
+                color: resetCooldown > 0 ? 'var(--text-muted)' : '#000',
+                border: 'none',
+                borderRadius: '8px',
+                padding: '11px 22px',
+                fontWeight: 700,
+                cursor: resetCooldown > 0 ? 'not-allowed' : 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '0.9rem',
+                boxShadow: resetCooldown > 0 ? 'none' : '0 4px 14px rgba(245, 158, 11, 0.3)'
+              }}
+            >
+              <Power size={16} />
+              {resetOverloadLoading ? 'Checking & Switching ON...' : resetCooldown > 0 ? `Wait (${resetCooldown}s)` : 'Switch Power Back ON'}
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                const el = document.getElementById('top-up-section');
+                if (el) el.scrollIntoView({ behavior: 'smooth' });
+              }}
+              style={{
+                background: 'var(--primary-accent)',
+                color: '#000',
+                border: 'none',
+                borderRadius: '8px',
+                padding: '11px 22px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '0.9rem'
+              }}
+            >
+              <Wallet size={16} /> Top-Up Account
+            </button>
+          )}
         </div>
       )}
 
