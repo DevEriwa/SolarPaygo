@@ -301,7 +301,10 @@ namespace SolarPaygo.Api.Controllers
                     system.GeneratorCapacity, system.PricePlanId, system.DeviceGroupId,
                     PricePlan = system.PricePlan == null ? null : new {
                         system.PricePlan.Id, system.PricePlan.Band, system.PricePlan.Name,
-                        system.PricePlan.PricePerKwh
+                        system.PricePlan.PricePerKwh,
+                        system.PricePlan.LoyaltyDiscountEnabled,
+                        system.PricePlan.LoyaltyThresholdKwh,
+                        system.PricePlan.LoyaltyDiscountPercent
                     },
                     MeterOnline = meterOnline
                 },
