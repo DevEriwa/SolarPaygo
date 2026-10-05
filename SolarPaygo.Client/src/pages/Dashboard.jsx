@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Search, Lock, Unlock, MinusCircle, CreditCard, Plus, Activity, User, ShieldAlert, BadgeCheck, Phone, Mail, FileText, Coins } from 'lucide-react';
+﻿import React, { useState, useEffect } from 'react';
+import { Search, Lock, Unlock, MinusCircle, CreditCard, Plus, Activity, User, ShieldAlert, BadgeCheck, Phone, Mail, FileText, Coins, Power } from 'lucide-react';
 import { BASE_URL } from '../config';
 
 export default function Dashboard({ dashboardData, loading, refreshData, pricePlans = [] }) {
@@ -96,7 +96,7 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
       const data = await res.json();
       if (res.ok) {
         setOverloadNotice({ type: 'success', text: data.message });
-        refetch();
+        if (typeof refreshData === 'function') refreshData();
       } else {
         setOverloadNotice({ type: 'error', text: data.message || 'Failed to switch on power.' });
       }
