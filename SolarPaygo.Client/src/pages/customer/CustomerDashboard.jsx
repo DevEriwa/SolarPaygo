@@ -1,6 +1,6 @@
 ﻿import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Zap, Activity, Wallet, Coins, Copy, CheckCircle2, History, CheckCircle, XCircle, AlertCircle, Key, Power, AlertTriangle, Lock } from 'lucide-react';
+import { Zap, Activity, Wallet, Coins, Copy, CheckCircle2, History, CheckCircle, XCircle, AlertCircle, Key, Power, AlertTriangle, Lock, TrendingUp, TrendingDown } from 'lucide-react';
 import { BASE_URL } from '../../config';
 import * as signalR from '@microsoft/signalr';
 
@@ -415,7 +415,69 @@ export default function CustomerDashboard() {
             <div className="stat-value">{(system.power ?? 0).toFixed(0)} <span style={{fontSize: '1rem', color: 'var(--text-muted)'}}>W</span></div>
           </div>
         </div>
+
+        <div className="stat-card">
+          <div className="stat-icon" style={{background: 'rgba(16, 185, 129, 0.1)', color: '#10b981'}}>
+            <TrendingUp size={24} />
+          </div>
+          <div className="stat-info">
+            <h3>Total kWh Bought</h3>
+            <div className="stat-value">{(system.cumulativeKwhBought ?? 0).toFixed(2)} <span style={{fontSize: '1rem', color: 'var(--text-muted)'}}>kWh</span></div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '4px' }}>All-time energy purchased</div>
+          </div>
+        </div>
+
+        <div className="stat-card">
+          <div className="stat-icon" style={{background: 'rgba(239, 68, 68, 0.1)', color: '#f87171'}}>
+            <TrendingDown size={24} />
+          </div>
+          <div className="stat-info">
+            <h3>Total kWh Used</h3>
+            <div className="stat-value">{(system.cumulativeKwhConsumed ?? 0).toFixed(2)} <span style={{fontSize: '1rem', color: 'var(--text-muted)'}}>kWh</span></div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '4px' }}>All-time energy consumed</div>
+          </div>
+        </div>
       </div>
+
+      {/* Loyalty / Usage Progress Banner */}
+      {(() => {
+        const bought = system.cumulativeKwhBought ?? 0;
+        const tiers = [
+          { label: 'Starter', min: 0, max: 100, color: '#94a3b8', nextColor: '#cd7f32' },
+          { label: 'Bronze', min: 100, max: 500, color: '#cd7f32', nextColor: '#94a3b8' },
+          { label: 'Silver', min: 500, max: 1000, color: '#94a3b8', nextColor: '#facc15' },
+          { label: 'Gold', min: 1000, max: null, color: '#facc15', nextColor: null },
+        ];
+        const currentTier = [...tiers].reverse().find(t => bought >= t.min) || tiers[0];
+        const nextTier = tiers[tiers.indexOf(currentTier) + 1] || null;
+        const progress = nextTier ? Math.min(100, ((bought - currentTier.min) / (nextTier.min - currentTier.min)) * 100) : 100;
+        const remaining = nextTier ? (nextTier.min - bought).toFixed(1) : 0;
+        return (
+          <div style={{ marginBottom: '20px', padding: '16px 20px', borderRadius: '12px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border-color)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <TrendingUp size={15} color={currentTier.color} />
+                <span style={{ color: currentTier.color, fontWeight: 700, fontSize: '0.88rem' }}>{currentTier.label} Tier</span>
+                <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>— {bought.toFixed(2)} kWh total bought</span>
+              </div>
+              {nextTier ? (
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                  {remaining} kWh to <strong style={{ color: nextTier.color }}>{nextTier.label}</strong> tier
+                </span>
+              ) : (
+                <span style={{ fontSize: '0.78rem', color: '#facc15', fontWeight: 700 }}>🏆 Highest Tier!</span>
+              )}
+            </div>
+            <div style={{ background: 'rgba(255,255,255,0.07)', borderRadius: '99px', height: '7px', overflow: 'hidden', marginBottom: '8px' }}>
+              <div style={{ width: `${progress}%`, height: '100%', borderRadius: '99px', background: currentTier.color, transition: 'width 0.6s ease' }} />
+            </div>
+            <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+              💡 Your price per kWh may reduce as you buy more energy. Track your total kWh here to know when you hit the next discount tier.
+            </div>
+          </div>
+        );
+      })()}
+
       <div style={{ marginTop: '-16px', marginBottom: '24px' }}>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginBottom: '10px' }}>
           <Coins size={12} style={{ verticalAlign: 'middle', marginRight: '4px' }} />
