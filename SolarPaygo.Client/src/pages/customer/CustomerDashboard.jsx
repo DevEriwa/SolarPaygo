@@ -514,27 +514,34 @@ export default function CustomerDashboard() {
         </div>
       </div>
 
-      {/* Loyalty / Usage Progress Banner — uses real plan threshold */}
+      {/* Loyalty / Usage Progress Banner — always shows, uses real plan threshold */}
       {(() => {
         const plan = system.pricePlan;
-        // --- Core kWh values --------------------------------------------------
-        const consumed = system.cumulativeKwhConsumed ?? 0; // what billing uses
-        const bought   = system.cumulativeKwhBought   ?? 0; // for display info
 
-        // --- Resolve the real loyalty threshold from the price plan -----------
-        // Backend PricingEngine checks CumulativeKwhConsumed >= LoyaltyThresholdKwh,
-        // so we mirror exactly that logic here for accuracy.
-        const loyaltyEnabled   = plan?.loyaltyDiscountEnabled  ?? false;
-        const loyaltyThreshold = plan?.loyaltyThresholdKwh     ?? 500;  // default 500
-        const loyaltyDiscount  = plan?.loyaltyDiscountPercent   ?? 50;   // default 50%
-        const baseRate         = plan?.pricePerKwh              ?? 2500;
+        // Core kWh values
+        const consumed = system.cumulativeKwhConsumed ?? 0; // billing metric
+        const bought   = system.cumulativeKwhBought   ?? 0; // display metric
+
+        // Resolve real loyalty settings from the plan (fallback to safe defaults)
+        const loyaltyEnabled   = plan?.loyaltyDiscountEnabled ?? false;
+        const loyaltyThreshold = loyaltyEnabled
+          ? (plan?.loyaltyThresholdKwh ?? 500)
+          : 500; // always show progress toward 500 kWh even without plan
+        const loyaltyDiscount  = plan?.loyaltyDiscountPercent ?? 50;
+        const baseRate         = plan?.pricePerKwh ?? 2500;
         const discountedRate   = baseRate * (1 - loyaltyDiscount / 100);
 
+        // Loyalty state — only relevant when admin has enabled loyalty on the plan
         const loyaltyUnlocked  = loyaltyEnabled && consumed >= loyaltyThreshold;
-        const kwhToDiscount    = loyaltyEnabled ? Math.max(0, loyaltyThreshold - consumed) : null;
-        const progress         = loyaltyEnabled
-          ? Math.min(100, (consumed / loyaltyThreshold) * 100)
-          : null; // no plan — hide bar
+        const kwhToDiscount    = Math.max(0, loyaltyThreshold - consumed);
+
+        // Progress bar: always use consumed/threshold so bar is always visible
+        // Use a minimum visual width of 2% so bar is never invisible at zero
+        const rawProgress = Math.min(100, (consumed / loyaltyThreshold) * 100);
+        const progress    = rawProgress < 2 && consumed > 0 ? 2 : rawProgress;
+        const barColor    = loyaltyUnlocked
+          ? 'linear-gradient(90deg, #f59e0b, #facc15)'
+          : 'linear-gradient(90deg, #38bdf8, #818cf8)';
 
         return (
           <div style={{ marginBottom: '20px', padding: '16px 20px', borderRadius: '12px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border-color)' }}>
@@ -553,39 +560,32 @@ export default function CustomerDashboard() {
                 )}
               </div>
 
-              {loyaltyEnabled && (
-                loyaltyUnlocked ? (
-                  <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#facc15', background: 'rgba(250,204,21,0.12)', border: '1px solid rgba(250,204,21,0.3)', borderRadius: '6px', padding: '3px 10px' }}>
-                    ✅ Rate: ₦{discountedRate.toLocaleString()}/kWh ({loyaltyDiscount}% off)
-                  </span>
-                ) : (
-                  <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                    <strong style={{ color: '#f59e0b' }}>{kwhToDiscount?.toFixed(2)} kWh consumed</strong> to unlock {loyaltyDiscount}% discount
-                  </span>
-                )
+              {/* Right side badge */}
+              {loyaltyUnlocked ? (
+                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#facc15', background: 'rgba(250,204,21,0.12)', border: '1px solid rgba(250,204,21,0.3)', borderRadius: '6px', padding: '3px 10px' }}>
+                  ✅ {loyaltyDiscount}% Discount Active — ₦{discountedRate.toLocaleString()}/kWh
+                </span>
+              ) : (
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                  <strong style={{ color: '#f59e0b' }}>{kwhToDiscount.toFixed(2)} kWh</strong> to discount tier
+                </span>
               )}
             </div>
 
-            {/* kWh consumed progress bar — only shown if plan has loyalty enabled */}
-            {loyaltyEnabled && (
-              <>
-                <div style={{ background: 'rgba(255,255,255,0.07)', borderRadius: '99px', height: '8px', overflow: 'hidden', marginBottom: '6px' }}>
-                  <div style={{
-                    width: `${progress}%`,
-                    height: '100%',
-                    borderRadius: '99px',
-                    background: loyaltyUnlocked
-                      ? 'linear-gradient(90deg, #f59e0b, #facc15)'
-                      : 'linear-gradient(90deg, #38bdf8, #818cf8)',
-                    transition: 'width 0.6s ease'
-                  }} />
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '8px' }}>
-                  <span>{consumed.toFixed(2)} kWh consumed</span>
-                  <span>Target: {loyaltyThreshold.toLocaleString()} kWh</span>
-                </div>
-              </>
-            )}
+            {/* Progress bar — always visible */}
+            <div style={{ background: 'rgba(255,255,255,0.07)', borderRadius: '99px', height: '8px', overflow: 'hidden', marginBottom: '6px' }}>
+              <div style={{
+                width: `${progress}%`,
+                height: '100%',
+                borderRadius: '99px',
+                background: barColor,
+                transition: 'width 0.6s ease'
+              }} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '10px' }}>
+              <span>{consumed.toFixed(2)} kWh consumed</span>
+              <span>Target: {loyaltyThreshold.toLocaleString()} kWh</span>
+            </div>
 
             {/* Stats row */}
             <div style={{ display: 'flex', gap: '18px', flexWrap: 'wrap', marginBottom: '8px' }}>
@@ -610,9 +610,9 @@ export default function CustomerDashboard() {
             <div style={{ fontSize: '0.73rem', color: 'var(--text-muted)' }}>
               {loyaltyEnabled
                 ? loyaltyUnlocked
-                  ? `🎉 You have qualified for the ${loyaltyDiscount}% loyalty discount on your Band ${plan?.band || ''} plan. Your electricity is now billed at ₦${discountedRate.toLocaleString()}/kWh.`
+                  ? `🎉 You have qualified for the ${loyaltyDiscount}% loyalty discount on your ${plan?.name || ('Band ' + plan?.band)} plan. Your electricity is now billed at ₦${discountedRate.toLocaleString()}/kWh.`
                   : `💡 When your total energy consumed reaches ${loyaltyThreshold.toLocaleString()} kWh, your rate drops by ${loyaltyDiscount}% to ₦${discountedRate.toLocaleString()}/kWh automatically.`
-                : '💡 Your current plan charges a flat rate per kWh. Loyalty discount is not enabled on this plan.'}
+                : `💡 Your price per kWh may reduce as you consume more energy. Track your progress here. Discount threshold: ${loyaltyThreshold.toLocaleString()} kWh.`}
             </div>
           </div>
         );
