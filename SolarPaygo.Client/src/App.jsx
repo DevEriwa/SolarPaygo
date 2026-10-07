@@ -12,6 +12,7 @@ import PaymentPortal from './pages/PaymentPortal';
 import SettingsPage from './pages/Settings';
 import Login from './pages/Login';
 import CustomerDashboard from './pages/customer/CustomerDashboard';
+import InvestorDashboard from './pages/investor/InvestorDashboard';
 import SuperAdminDashboard from './pages/superadmin/SuperAdminDashboard';
 import ImpersonationBanner from './components/ImpersonationBanner';
 import LandingPage from './pages/landing/LandingPage';
@@ -274,6 +275,47 @@ function AppContent() {
         <main className="main-content">
           <Routes>
             <Route path="/" element={<CustomerDashboard />} />
+            <Route path="*" element={<Navigate to="/" />} />
+          </Routes>
+        </main>
+      </div>
+    );
+  }
+
+  // Investor Layout
+  if (role === 'Investor') {
+    return (
+      <div className="app-container" style={isImpersonating ? { paddingTop: '42px' } : {}}>
+        {isImpersonating && (
+          <ImpersonationBanner role={ghostRole} target={ghostTarget} onExit={handleExitImpersonate} />
+        )}
+        <aside className="sidebar">
+          <div className="sidebar-logo" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{ background: '#ffffff', padding: '3px 8px', borderRadius: '6px', display: 'inline-flex' }}>
+              <img src="/idiasco-logo.png" alt="IDIASCO" style={{ height: '30px', width: 'auto' }} />
+            </div>
+            <span>IDIASCO <span style={{fontWeight: 400, color: '#38bdf8', fontSize: '0.85em'}}>INVESTOR</span></span>
+          </div>
+
+          <nav style={{ flex: 1 }}>
+            <ul className="nav-links">
+              <li>
+                <NavLink to="/" className={({isActive}) => isActive ? "nav-item active" : "nav-item"}>
+                  <LayoutDashboard size={20} />
+                  Portfolio Overview
+                </NavLink>
+              </li>
+            </ul>
+          </nav>
+
+          <button onClick={handleLogout} className="action-btn" style={{ marginTop: 'auto', width: '100%', borderColor: 'var(--border-color)' }}>
+            <LogOut size={16} /> Logout
+          </button>
+        </aside>
+
+        <main className="main-content">
+          <Routes>
+            <Route path="/" element={<InvestorDashboard handleLogout={handleLogout} />} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </main>

@@ -46,7 +46,7 @@ namespace SolarPaygo.Api.Controllers
                     }
                     if (adminUser.Password == password)
                     {
-                        return Ok(new { Token = GenerateJwtToken(adminUser.Username, adminUser.Role, 0) });
+                        return Ok(new { Token = GenerateJwtToken(adminUser.Username, adminUser.Role, adminUser.DeviceGroupId ?? 0), Role = adminUser.Role, DeviceGroupId = adminUser.DeviceGroupId });
                     }
                     return Unauthorized("Invalid credentials");
                 }
