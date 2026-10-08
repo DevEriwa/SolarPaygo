@@ -57,7 +57,7 @@ export default function Login({ setAuthToken }) {
         </div>
         <h2 style={{ textAlign: 'center', marginBottom: '8px', color: 'white' }}>Idiasco SolarPaygo Portal</h2>
         <p style={{ textAlign: 'center', color: 'var(--text-muted)', marginBottom: '28px', fontSize: '0.9rem' }}>
-          Admins: Use your admin username and password.<br/>
+          Admins: Use your admin credentials.<br/>\n          Investors: Use your assigned investor credentials.<br/>
           Customers: Use your Email and Hardware ID.
         </p>
         {error && <div style={{ color: 'var(--danger)', marginBottom: '16px', textAlign: 'center' }}>{error}</div>}
