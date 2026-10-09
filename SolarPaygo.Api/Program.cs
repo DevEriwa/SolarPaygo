@@ -285,6 +285,81 @@ using (var scope = app.Services.CreateScope())
             BEGIN
                 ALTER TABLE GeneratorCapacities ADD OverloadThresholdPercent INT NOT NULL DEFAULT 90;
             END
+            -- Smart Remittance & Exit Governance columns on DeviceGroups
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('DeviceGroups') AND name = 'InvestorsCapital')
+            BEGIN
+                ALTER TABLE DeviceGroups ADD InvestorsCapital DECIMAL(18,2) NOT NULL DEFAULT 0;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('DeviceGroups') AND name = 'IsRoiEnabled')
+            BEGIN
+                ALTER TABLE DeviceGroups ADD IsRoiEnabled BIT NOT NULL DEFAULT 0;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('DeviceGroups') AND name = 'RoiPercentage')
+            BEGIN
+                ALTER TABLE DeviceGroups ADD RoiPercentage DECIMAL(18,2) NOT NULL DEFAULT 15.00;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('DeviceGroups') AND name = 'RemittanceSharePercent')
+            BEGIN
+                ALTER TABLE DeviceGroups ADD RemittanceSharePercent DECIMAL(18,2) NOT NULL DEFAULT 100.00;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('DeviceGroups') AND name = 'SettlementCycle')
+            BEGIN
+                ALTER TABLE DeviceGroups ADD SettlementCycle NVARCHAR(50) NOT NULL DEFAULT 'Monthly';
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('DeviceGroups') AND name = 'IsReturnCapital')
+            BEGIN
+                ALTER TABLE DeviceGroups ADD IsReturnCapital BIT NOT NULL DEFAULT 0;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('DeviceGroups') AND name = 'ExitNoticeDate')
+            BEGIN
+                ALTER TABLE DeviceGroups ADD ExitNoticeDate DATETIME2 NULL;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('DeviceGroups') AND name = 'ExitTargetDate')
+            BEGIN
+                ALTER TABLE DeviceGroups ADD ExitTargetDate DATETIME2 NULL;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('DeviceGroups') AND name = 'ExitCapitalAmount')
+            BEGIN
+                ALTER TABLE DeviceGroups ADD ExitCapitalAmount DECIMAL(18,2) NULL;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('DeviceGroups') AND name = 'IsAccountClosed')
+            BEGIN
+                ALTER TABLE DeviceGroups ADD IsAccountClosed BIT NOT NULL DEFAULT 0;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('DeviceGroups') AND name = 'InvestorAdminAccountId')
+            BEGIN
+                ALTER TABLE DeviceGroups ADD InvestorAdminAccountId INT NULL;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('AdminAccounts') AND name = 'DeviceGroupId')
+            BEGIN
+                ALTER TABLE AdminAccounts ADD DeviceGroupId INT NULL;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'InvestorSettlements')
+            BEGIN
+                CREATE TABLE InvestorSettlements (
+                    Id INT IDENTITY(1,1) PRIMARY KEY,
+                    DeviceGroupId INT NOT NULL,
+                    Amount DECIMAL(18,2) NOT NULL,
+                    SettlementCycle NVARCHAR(50) NOT NULL DEFAULT 'Monthly',
+                    Status NVARCHAR(50) NOT NULL DEFAULT 'Settled',
+                    Reference NVARCHAR(200) NULL,
+                    Notes NVARCHAR(500) NULL,
+                    SettledAt DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+                    CreatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+                );
+            END
 
             IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'GeneratorCapacities')
             BEGIN

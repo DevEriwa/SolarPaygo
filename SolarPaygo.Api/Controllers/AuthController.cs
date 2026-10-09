@@ -46,7 +46,7 @@ namespace SolarPaygo.Api.Controllers
                     }
                     if (adminUser.Password == password)
                     {
-                        return Ok(new { Token = GenerateJwtToken(adminUser.Username, adminUser.Role, 0) });
+                        return Ok(new { Token = GenerateJwtToken(adminUser.Username, adminUser.Role, adminUser.DeviceGroupId ?? 0), Role = adminUser.Role, DeviceGroupId = adminUser.DeviceGroupId });
                     }
                     return Unauthorized("Invalid credentials");
                 }
@@ -100,12 +100,14 @@ namespace SolarPaygo.Api.Controllers
             var claims = new List<Claim>
             {
                 new Claim(JwtRegisteredClaimNames.Sub, subject),
-                new Claim(ClaimTypes.Role, role)
+                new Claim(ClaimTypes.Role, role),
+                new Claim(ClaimTypes.NameIdentifier, subject)
             };
 
             if (systemId > 0)
             {
                 claims.Add(new Claim("SystemId", systemId.ToString()));
+                claims.Add(new Claim("DeviceGroupId", systemId.ToString()));
             }
 
             var token = new JwtSecurityToken(
@@ -117,6 +119,8 @@ namespace SolarPaygo.Api.Controllers
 
             return new JwtSecurityTokenHandler().WriteToken(token);
         }
+
+
 
         [Authorize(Roles = "Admin")]
         [HttpGet("debug/customer/{email}")]
