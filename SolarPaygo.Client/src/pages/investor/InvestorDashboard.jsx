@@ -33,6 +33,9 @@ export default function InvestorDashboard({ handleLogout }) {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     if (!res.ok) {
+      if (res.status === 401 && typeof handleLogout === "function") {
+        handleLogout();
+      }
       const err = await res.text();
       throw new Error(err || 'Failed to load portfolio.');
     }
@@ -64,15 +67,26 @@ export default function InvestorDashboard({ handleLogout }) {
           <p style={{ color: 'var(--text-muted)', marginBottom: '20px', fontSize: '0.9rem' }}>
             {error?.message || 'Unable to retrieve your investment portfolio. Please contact system support.'}
           </p>
-          <button onClick={() => refetch()} className="action-btn" style={{ background: 'var(--primary-accent)', color: '#000', margin: '0 auto' }}>
-            <RefreshCw size={16} /> Retry
-          </button>
+          <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+            <button onClick={() => refetch()} className="action-btn" style={{ background: 'var(--primary-accent)', color: '#000' }}>
+              <RefreshCw size={16} /> Retry
+            </button>
+            {typeof handleLogout === 'function' && (
+              <button onClick={handleLogout} className="action-btn" style={{ borderColor: 'var(--border-color)', color: '#fff' }}>
+                Log Out
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );
   }
 
-  const { Group: group, Financials: fin, Meters: meters = [], Settlements: settlements = [], RecentTransactions: recentTx = [] } = data;
+  const group = data?.Group || data?.group || {};
+  const fin = data?.Financials || data?.financials || {};
+  const meters = data?.Meters || data?.meters || [];
+  const settlements = data?.Settlements || data?.settlements || [];
+  const recentTx = data?.RecentTransactions || data?.recentTransactions || [];
 
   const activeMeterCount = meters.filter(m => m.status === 'Active').length;
   const totalPowerW = meters.reduce((sum, m) => sum + (Number(m.power) || 0), 0);
