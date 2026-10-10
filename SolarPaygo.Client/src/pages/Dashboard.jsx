@@ -1,3 +1,4 @@
+import InvestorAdminSection from '../components/InvestorAdminSection';
 ﻿import React, { useState, useEffect } from 'react';
 import { Search, Lock, Unlock, MinusCircle, CreditCard, Plus, Activity, User, ShieldAlert, BadgeCheck, Phone, Mail, FileText, Coins, Power, Key } from 'lucide-react';
 import { BASE_URL } from '../config';
@@ -458,9 +459,28 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
         >
           👤 Customer Profiles & Payments
         </button>
+        <button 
+          onClick={() => setActiveView('investors')} 
+          style={{
+            padding: '10px 20px', 
+            borderRadius: '6px', 
+            background: activeView === 'investors' ? 'var(--primary-accent)' : 'transparent',
+            color: activeView === 'investors' ? 'var(--bg-dark)' : 'var(--text-muted)',
+            border: 'none',
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            fontSize: '0.9rem',
+            transition: 'all 0.2s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}
+        >
+          💼 Investor Payouts & Yields
+        </button>
       </div>
 
-      {activeView === 'generators' ? (
+      {activeView === 'generators' && (
         <div>
           {/* STATS GRID */}
           <div className="stats-grid">
@@ -888,7 +908,9 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
         </div>
       </div>
 
-      ) : (
+      )}
+
+      {activeView === 'customers' && (
         /* CUSTOMERS & TRANSACTIONS DATABASE VIEW */
         <div className="glass-panel" style={{ width: '100%' }}>
           {/* Device Group / Tab Selector */}
@@ -1361,6 +1383,10 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
             </table>
           </div>
         </div>
+      )}
+
+      {activeView === 'investors' && (
+        <InvestorAdminSection formatNaira={formatNaira} />
       )}
 
       {/* REGISTRATION MODAL */}

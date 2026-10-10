@@ -159,7 +159,7 @@ function GroupRow({ group, onChanged }) {
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
             {group.isRoiEnabled ? (
               <span style={{ fontSize: '0.74rem', background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', padding: '3px 8px', borderRadius: '4px', border: '1px solid rgba(16, 185, 129, 0.3)', fontWeight: 600 }}>
-                Capital: {formatNaira(group.investorsCapital)} • {group.roiPercentage}% ROI
+                Capital: {formatNaira(group.investorsCapital)} • {group.roiPercentage}% ROI ({formatNaira(Math.round(group.investorsCapital * (group.roiPercentage / 100)))}/yr cap)
               </span>
             ) : (
               <span style={{ fontSize: '0.72rem', background: 'rgba(255, 255, 255, 0.05)', color: 'var(--text-muted)', padding: '3px 8px', borderRadius: '4px' }}>
