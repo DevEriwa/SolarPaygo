@@ -80,7 +80,6 @@ namespace SolarPaygo.Api.Controllers
             // Completed transactions on these meters
             var transactions = await _context.Transactions
                 .Where(t => systemIds.Contains(t.SolarSystemId) && t.Status == "Completed")
-                .OrderByDescending(t => t.TransactionDate)
                 .ToListAsync();
 
             var now = DateTime.UtcNow;
@@ -92,29 +91,98 @@ namespace SolarPaygo.Api.Controllers
             // Remittance share ratio
             decimal shareRatio = (group.RemittanceSharePercent > 0 ? group.RemittanceSharePercent : 100m) / 100m;
 
-            decimal grossTotal = transactions.Sum(t => t.AmountPaid);
-            decimal grossToday = transactions.Where(t => t.TransactionDate >= todayUtc).Sum(t => t.AmountPaid);
-            decimal grossWeek = transactions.Where(t => t.TransactionDate >= startOfWeek).Sum(t => t.AmountPaid);
-            decimal grossMonth = transactions.Where(t => t.TransactionDate >= startOfMonth).Sum(t => t.AmountPaid);
-            decimal grossYear = transactions.Where(t => t.TransactionDate >= startOfYear).Sum(t => t.AmountPaid);
+            // Annual ROI target milestone (e.g. dynamic % of InvestorsCapital)
+            decimal roiRate = group.RoiPercentage;
+            decimal annualRoiMilestone = (group.IsRoiEnabled && group.InvestorsCapital > 0 && roiRate > 0)
+                ? Math.Round(group.InvestorsCapital * (roiRate / 100m), 2)
+                : 0m;
 
-            // Uncapped amounts directly derived from meter collections
-            decimal uncappedShareTotal = Math.Round(grossTotal * shareRatio, 2);
-            decimal uncappedShareYear = Math.Round(grossYear * shareRatio, 2);
-            decimal uncappedShareMonth = Math.Round(grossMonth * shareRatio, 2);
-            decimal uncappedShareWeek = Math.Round(grossWeek * shareRatio, 2);
-            decimal uncappedShareToday = Math.Round(grossToday * shareRatio, 2);
+            // Sort transactions chronologically (oldest to newest) to accurately track milestone fulfillment
+            var chronologicalTx = transactions.OrderBy(t => t.TransactionDate).ToList();
 
-            // Annual ROI target milestone (e.g. 15% of InvestorsCapital)
-            decimal roiRate = group.RoiPercentage > 0 ? group.RoiPercentage : 15m;
-            decimal annualRoiMilestone = Math.Round(group.InvestorsCapital * (roiRate / 100m), 2);
+            decimal grossTotal = 0m;
+            decimal grossToday = 0m;
+            decimal grossWeek = 0m;
+            decimal grossMonth = 0m;
+            decimal grossYear = 0m;
 
-            // CAPPED REMITTANCE: Investor earnings stop once the annual 15% ROI milestone is reached
-            decimal remittedYear = annualRoiMilestone > 0
-                ? Math.Min(annualRoiMilestone, uncappedShareYear)
-                : uncappedShareYear;
+            decimal uncappedShareYear = 0m;
+            decimal uncappedShareTotal = 0m;
 
-            bool isCapReached = annualRoiMilestone > 0 && uncappedShareYear >= annualRoiMilestone;
+            decimal runningYearInvestorShare = 0m;
+            decimal remittedYear = 0m;
+            decimal remittedMonth = 0m;
+            decimal remittedWeek = 0m;
+            decimal remittedToday = 0m;
+
+            var processedTransactions = new List<object>();
+
+            foreach (var t in chronologicalTx)
+            {
+                grossTotal += t.AmountPaid;
+
+                bool isCurrentYear = t.TransactionDate >= startOfYear;
+                bool isCurrentMonth = t.TransactionDate >= startOfMonth;
+                bool isCurrentWeek = t.TransactionDate >= startOfWeek;
+                bool isToday = t.TransactionDate >= todayUtc;
+
+                if (isCurrentYear) grossYear += t.AmountPaid;
+                if (isCurrentMonth) grossMonth += t.AmountPaid;
+                if (isCurrentWeek) grossWeek += t.AmountPaid;
+                if (isToday) grossToday += t.AmountPaid;
+
+                decimal uncappedTxShare = Math.Round(t.AmountPaid * shareRatio, 2);
+                if (isCurrentYear) uncappedShareYear += uncappedTxShare;
+                uncappedShareTotal += uncappedTxShare;
+
+                decimal eligibleTxShare = uncappedTxShare;
+                string statusText = t.Status ?? "Completed";
+
+                if (annualRoiMilestone > 0 && isCurrentYear)
+                {
+                    decimal remainingCap = Math.Max(0m, annualRoiMilestone - runningYearInvestorShare);
+                    eligibleTxShare = Math.Min(uncappedTxShare, remainingCap);
+
+                    if (eligibleTxShare <= 0m && uncappedTxShare > 0m)
+                    {
+                        statusText = "Cap Reached";
+                    }
+                    else if (eligibleTxShare < uncappedTxShare)
+                    {
+                        statusText = "Cap Partially Reached";
+                    }
+
+                    runningYearInvestorShare += eligibleTxShare;
+                    remittedYear += eligibleTxShare;
+
+                    if (isCurrentMonth) remittedMonth += eligibleTxShare;
+                    if (isCurrentWeek) remittedWeek += eligibleTxShare;
+                    if (isToday) remittedToday += eligibleTxShare;
+                }
+                else
+                {
+                    remittedYear += eligibleTxShare;
+                    if (isCurrentMonth) remittedMonth += eligibleTxShare;
+                    if (isCurrentWeek) remittedWeek += eligibleTxShare;
+                    if (isToday) remittedToday += eligibleTxShare;
+                }
+
+                var meter = systems.FirstOrDefault(s => s.Id == t.SolarSystemId);
+
+                processedTransactions.Add(new
+                {
+                    t.Id,
+                    t.SolarSystemId,
+                    HardwareId = meter?.HardwareId ?? "Meter",
+                    CustomerName = meter?.OwnerName ?? "Customer",
+                    GrossAmount = t.AmountPaid,
+                    InvestorShareAmount = eligibleTxShare,
+                    t.TransactionDate,
+                    Status = statusText
+                });
+            }
+
+            bool isCapReached = annualRoiMilestone > 0 && remittedYear >= annualRoiMilestone;
             decimal companySurplusYear = Math.Max(0m, uncappedShareYear - remittedYear);
             decimal companySurplusTotal = Math.Max(0m, uncappedShareTotal - remittedYear);
 
@@ -189,9 +257,9 @@ namespace SolarPaygo.Api.Controllers
                     GrossToday = grossToday,
 
                     // Period breakdown
-                    RemittedMonth = uncappedShareMonth,
-                    RemittedWeek = uncappedShareWeek,
-                    RemittedToday = uncappedShareToday,
+                    RemittedMonth = remittedMonth,
+                    RemittedWeek = remittedWeek,
+                    RemittedToday = remittedToday,
 
                     SettlementCycle = group.SettlementCycle
                 },
@@ -212,17 +280,7 @@ namespace SolarPaygo.Api.Controllers
                     s.LastSyncTime
                 }),
                 Settlements = settlements,
-                RecentTransactions = transactions.Take(25).Select(t => new
-                {
-                    t.Id,
-                    t.SolarSystemId,
-                    HardwareId = systems.FirstOrDefault(s => s.Id == t.SolarSystemId)?.HardwareId ?? "Meter",
-                    CustomerName = systems.FirstOrDefault(s => s.Id == t.SolarSystemId)?.OwnerName ?? "Customer",
-                    GrossAmount = t.AmountPaid,
-                    InvestorShareAmount = Math.Round(t.AmountPaid * shareRatio, 2),
-                    t.TransactionDate,
-                    t.Status
-                })
+                RecentTransactions = processedTransactions.OrderByDescending(p => ((dynamic)p).TransactionDate).Take(25)
             });
         }
 
@@ -266,23 +324,69 @@ namespace SolarPaygo.Api.Controllers
             {
                 var gSystems = systems.Where(s => s.DeviceGroupId == g.Id).ToList();
                 var gSystemIds = gSystems.Select(s => s.Id).ToList();
-                var gTx = allTransactions.Where(t => gSystemIds.Contains(t.SolarSystemId)).ToList();
+                var gTx = allTransactions.Where(t => gSystemIds.Contains(t.SolarSystemId)).OrderBy(t => t.TransactionDate).ToList();
                 var gSettlements = allSettlements.Where(s => s.DeviceGroupId == g.Id).ToList();
 
                 decimal shareRatio = (g.RemittanceSharePercent > 0 ? g.RemittanceSharePercent : 100m) / 100m;
-                decimal roiRate = g.RoiPercentage > 0 ? g.RoiPercentage : 15m;
-                decimal annualRoiMilestone = Math.Round(g.InvestorsCapital * (roiRate / 100m), 2);
+                decimal roiRate = g.RoiPercentage;
+                decimal annualRoiMilestone = (g.IsRoiEnabled && g.InvestorsCapital > 0 && roiRate > 0)
+                    ? Math.Round(g.InvestorsCapital * (roiRate / 100m), 2)
+                    : 0m;
 
-                decimal grossTotal = gTx.Sum(t => t.AmountPaid);
-                decimal grossYear = gTx.Where(t => t.TransactionDate >= startOfYear).Sum(t => t.AmountPaid);
-                decimal grossMonth = gTx.Where(t => t.TransactionDate >= startOfMonth).Sum(t => t.AmountPaid);
-                decimal grossWeek = gTx.Where(t => t.TransactionDate >= startOfWeek).Sum(t => t.AmountPaid);
-                decimal grossToday = gTx.Where(t => t.TransactionDate >= todayUtc).Sum(t => t.AmountPaid);
+                decimal grossTotal = 0m;
+                decimal grossYear = 0m;
+                decimal grossMonth = 0m;
+                decimal grossWeek = 0m;
+                decimal grossToday = 0m;
 
-                decimal uncappedYear = Math.Round(grossYear * shareRatio, 2);
-                decimal uncappedTotal = Math.Round(grossTotal * shareRatio, 2);
-                decimal remittedYear = annualRoiMilestone > 0 ? Math.Min(annualRoiMilestone, uncappedYear) : uncappedYear;
-                bool isCapReached = annualRoiMilestone > 0 && uncappedYear >= annualRoiMilestone;
+                decimal uncappedYear = 0m;
+                decimal runningYearInvestorShare = 0m;
+                decimal remittedYear = 0m;
+                decimal remittedMonth = 0m;
+                decimal remittedWeek = 0m;
+                decimal remittedToday = 0m;
+
+                foreach (var t in gTx)
+                {
+                    grossTotal += t.AmountPaid;
+
+                    bool isCurrentYear = t.TransactionDate >= startOfYear;
+                    bool isCurrentMonth = t.TransactionDate >= startOfMonth;
+                    bool isCurrentWeek = t.TransactionDate >= startOfWeek;
+                    bool isToday = t.TransactionDate >= todayUtc;
+
+                    if (isCurrentYear) grossYear += t.AmountPaid;
+                    if (isCurrentMonth) grossMonth += t.AmountPaid;
+                    if (isCurrentWeek) grossWeek += t.AmountPaid;
+                    if (isToday) grossToday += t.AmountPaid;
+
+                    decimal uncappedTxShare = Math.Round(t.AmountPaid * shareRatio, 2);
+                    if (isCurrentYear) uncappedYear += uncappedTxShare;
+
+                    decimal eligibleTxShare = uncappedTxShare;
+
+                    if (annualRoiMilestone > 0 && isCurrentYear)
+                    {
+                        decimal remainingCap = Math.Max(0m, annualRoiMilestone - runningYearInvestorShare);
+                        eligibleTxShare = Math.Min(uncappedTxShare, remainingCap);
+
+                        runningYearInvestorShare += eligibleTxShare;
+                        remittedYear += eligibleTxShare;
+
+                        if (isCurrentMonth) remittedMonth += eligibleTxShare;
+                        if (isCurrentWeek) remittedWeek += eligibleTxShare;
+                        if (isToday) remittedToday += eligibleTxShare;
+                    }
+                    else
+                    {
+                        remittedYear += eligibleTxShare;
+                        if (isCurrentMonth) remittedMonth += eligibleTxShare;
+                        if (isCurrentWeek) remittedWeek += eligibleTxShare;
+                        if (isToday) remittedToday += eligibleTxShare;
+                    }
+                }
+
+                bool isCapReached = annualRoiMilestone > 0 && remittedYear >= annualRoiMilestone;
                 decimal companySurplusYear = Math.Max(0m, uncappedYear - remittedYear);
 
                 decimal totalSettled = gSettlements.Sum(s => s.Amount);
@@ -316,6 +420,9 @@ namespace SolarPaygo.Api.Controllers
                     GrossTotal = grossTotal,
 
                     RemittedYear = remittedYear,
+                    RemittedMonth = remittedMonth,
+                    RemittedWeek = remittedWeek,
+                    RemittedToday = remittedToday,
                     UncappedShareYear = uncappedYear,
                     CompanySurplusYear = companySurplusYear,
                     IsCapReached = isCapReached,

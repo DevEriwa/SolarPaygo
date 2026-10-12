@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   DollarSign,
@@ -13,7 +13,8 @@ import {
   UserCheck,
   Send,
   X,
-  Award
+  Award,
+  CalendarCheck
 } from 'lucide-react';
 import { BASE_URL } from '../config';
 
@@ -24,6 +25,12 @@ export default function InvestorAdminSection({ formatNaira }) {
   const [payoutNotes, setPayoutNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState(null);
+
+  const now = new Date();
+  const currentMonthName = now.toLocaleString('default', { month: 'short' });
+  const currentYear = now.getFullYear();
+  const endOfMonth = new Date(currentYear, now.getMonth() + 1, 0);
+  const daysUntilMonthEnd = Math.max(0, endOfMonth.getDate() - now.getDate());
 
   const fetchAdminSummary = async () => {
     const token = localStorage.getItem('token');
@@ -47,7 +54,7 @@ export default function InvestorAdminSection({ formatNaira }) {
     // Pre-fill with the exact pending amount to prevent overpaying or underpaying!
     setPayoutAmount(group.pendingSettlement || 0);
     setPayoutRef('');
-    setPayoutNotes(`Monthly remittance payout for ${group.name}`);
+    setPayoutNotes(`${currentMonthName} remittance payout for ${group.name}`);
     setFeedbackMsg(null);
   };
 
@@ -109,9 +116,14 @@ export default function InvestorAdminSection({ formatNaira }) {
   const totalGrossRevenue = summaryList.reduce((acc, g) => acc + (Number(g.grossYear) || 0), 0);
   const totalTargetYield = summaryList.reduce((acc, g) => acc + (Number(g.annualRoiMilestone) || 0), 0);
   const totalEarnedYield = summaryList.reduce((acc, g) => acc + (Number(g.remittedYear) || 0), 0);
+  const totalThisMonthYield = summaryList.reduce((acc, g) => acc + (Number(g.remittedMonth) || 0), 0);
   const totalSettled = summaryList.reduce((acc, g) => acc + (Number(g.totalSettled) || 0), 0);
   const totalPendingDue = summaryList.reduce((acc, g) => acc + (Number(g.pendingSettlement) || 0), 0);
   const totalCompanySurplus = summaryList.reduce((acc, g) => acc + (Number(g.companySurplusYear) || 0), 0);
+  
+  const completedPortfoliosCount = summaryList.filter(g => 
+    g.isCapReached && (Number(g.pendingSettlement) || 0) <= 0 && (Number(g.totalSettled) || 0) >= (Number(g.annualRoiMilestone) || 0)
+  ).length;
 
   if (isLoading) {
     return (
@@ -136,14 +148,14 @@ export default function InvestorAdminSection({ formatNaira }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      {/* ─── Top Control Bar ────────────────────────────────────────── */}
+      {/* â”€â”€â”€ Top Control Bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
         <div>
           <h2 style={{ fontSize: '1.4rem', fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Layers size={22} color="var(--primary-accent)" /> Investor Portfolios & Payout Governance
+            <Layers size={22} color="var(--primary-accent)" /> Investor Portfolios & Month-End Payout Governance
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.86rem', marginTop: '4px' }}>
-            Accurate revenue sharing, 15% annual yield milestone caps, and settlement balance verification to eliminate under/over-payments.
+            Month-end payment schedules, accurate monthly collections to pay, and full-year completion tracking.
           </p>
         </div>
         <button onClick={() => refetch()} disabled={isFetching} className="action-btn" style={{ padding: '8px 14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -152,7 +164,7 @@ export default function InvestorAdminSection({ formatNaira }) {
         </button>
       </div>
 
-      {/* ─── High-Level Financial Metrics Grid ──────────────────────── */}
+      {/* â”€â”€â”€ High-Level Financial Metrics Grid â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '16px' }}>
         {/* Card 1: Total Capital */}
         <div className="glass-panel" style={{ padding: '18px' }}>
@@ -167,10 +179,10 @@ export default function InvestorAdminSection({ formatNaira }) {
           </div>
         </div>
 
-        {/* Card 2: Annual 15% Target Cap */}
+        {/* Card 2: Annual Target Cap */}
         <div className="glass-panel" style={{ padding: '18px' }}>
           <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
-            Annual Target Yield (15% Cap)
+            Annual Target Yield Cap
           </div>
           <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#10b981', marginTop: '6px' }}>
             {formatNaira(totalTargetYield)}
@@ -180,33 +192,20 @@ export default function InvestorAdminSection({ formatNaira }) {
           </div>
         </div>
 
-        {/* Card 3: Gross Customer Revenue */}
-        <div className="glass-panel" style={{ padding: '18px' }}>
-          <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
-            Gross Meter Top-ups (Year)
+        {/* Card 3: Generated This Month to Pay */}
+        <div className="glass-panel" style={{ padding: '18px', background: 'rgba(56, 189, 248, 0.05)', borderColor: 'rgba(56, 189, 248, 0.3)' }}>
+          <div style={{ fontSize: '0.76rem', color: '#38bdf8', textTransform: 'uppercase', fontWeight: 700 }}>
+            Generated This Month ({currentMonthName})
           </div>
-          <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#fff', marginTop: '6px' }}>
-            {formatNaira(totalGrossRevenue)}
-          </div>
-          <div style={{ fontSize: '0.74rem', color: '#38bdf8', marginTop: '4px' }}>
-            Collected from customer meters
-          </div>
-        </div>
-
-        {/* Card 4: Accrued Earned Yield (Capped) */}
-        <div className="glass-panel" style={{ padding: '18px' }}>
-          <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
-            Investor Yield (Capped)
-          </div>
-          <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#a78bfa', marginTop: '6px' }}>
-            {formatNaira(totalEarnedYield)}
+          <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#38bdf8', marginTop: '6px' }}>
+            {formatNaira(totalThisMonthYield)}
           </div>
           <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-            Settled: {formatNaira(totalSettled)}
+            Month-end due: {currentMonthName} {endOfMonth.getDate()}
           </div>
         </div>
 
-        {/* Card 5: EXACT PAYOUT BALANCE DUE (CRITICAL) */}
+        {/* Card 4: EXACT PAYOUT BALANCE DUE (CRITICAL) */}
         <div className="glass-panel" style={{ padding: '18px', background: totalPendingDue > 0 ? 'rgba(245, 158, 11, 0.08)' : 'rgba(255, 255, 255, 0.02)', borderColor: totalPendingDue > 0 ? 'rgba(245, 158, 11, 0.4)' : 'var(--border-color)' }}>
           <div style={{ fontSize: '0.76rem', color: totalPendingDue > 0 ? '#f59e0b' : 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>
             Total Payout Due (Unsettled)
@@ -215,7 +214,20 @@ export default function InvestorAdminSection({ formatNaira }) {
             {formatNaira(totalPendingDue)}
           </div>
           <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-            Exact sum payable to all investors
+            Payable to all investors now
+          </div>
+        </div>
+
+        {/* Card 5: Full-Year Completed Portfolios */}
+        <div className="glass-panel" style={{ padding: '18px' }}>
+          <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
+            Annual Payouts Completed
+          </div>
+          <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#10b981', marginTop: '6px' }}>
+            {completedPortfoliosCount} / {summaryList.length}
+          </div>
+          <div style={{ fontSize: '0.74rem', color: '#10b981', marginTop: '4px' }}>
+            100% fulfilled for {currentYear}
           </div>
         </div>
 
@@ -224,19 +236,22 @@ export default function InvestorAdminSection({ formatNaira }) {
           <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
             IDIASCO Retained Surplus
           </div>
-          <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#38bdf8', marginTop: '6px' }}>
+          <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#fff', marginTop: '6px' }}>
             {formatNaira(totalCompanySurplus)}
           </div>
           <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-            Revenue above 15% investor cap
+            Revenue above target yield cap
           </div>
         </div>
       </div>
 
-      {/* ─── Detailed Investor Portfolio Table ───────────────────────── */}
+      {/* â”€â”€â”€ Detailed Investor Portfolio Table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <div className="glass-panel" style={{ padding: '20px' }}>
-        <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#fff', marginBottom: '14px' }}>
-          Investor Portfolios & Settlement Balances
+        <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#fff', marginBottom: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span>Investor Portfolios, Monthly Earnings & Payout Schedules</span>
+          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 400 }}>
+            Next Monthly Settlement: <strong>{currentMonthName} {endOfMonth.getDate()}, {currentYear}</strong>
+          </span>
         </h3>
 
         {summaryList.length === 0 ? (
@@ -249,121 +264,201 @@ export default function InvestorAdminSection({ formatNaira }) {
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', textAlign: 'left' }}>
                   <th style={{ padding: '12px 14px' }}>Portfolio / Group</th>
-                  <th style={{ padding: '12px 14px' }}>Investor Account</th>
-                  <th style={{ padding: '12px 14px' }}>Principal Capital</th>
-                  <th style={{ padding: '12px 14px' }}>Annual Cap (15%)</th>
-                  <th style={{ padding: '12px 14px' }}>Meter Top-ups (Year)</th>
-                  <th style={{ padding: '12px 14px' }}>Capture Share</th>
-                  <th style={{ padding: '12px 14px' }}>Investor Yield</th>
+                  <th style={{ padding: '12px 14px' }}>Investor</th>
+                  <th style={{ padding: '12px 14px' }}>Capital & Cap</th>
+                  <th style={{ padding: '12px 14px' }}>This Month ({currentMonthName})</th>
+                  <th style={{ padding: '12px 14px' }}>Year Yield (Cap)</th>
                   <th style={{ padding: '12px 14px' }}>Paid Out</th>
                   <th style={{ padding: '12px 14px' }}>NET DUE TO PAY</th>
+                  <th style={{ padding: '12px 14px' }}>Payment Schedule / Status</th>
                   <th style={{ padding: '12px 14px', textAlign: 'center' }}>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {summaryList.map(g => (
-                  <tr key={g.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                    {/* Name */}
-                    <td style={{ padding: '12px 14px', fontWeight: 600, color: '#fff' }}>
-                      {g.name}
-                      {g.meterCount > 0 ? (
-                        <span style={{ fontSize: '0.72rem', color: '#10b981', display: 'block' }}>⚡ {g.meterCount} Meters</span>
-                      ) : (
-                        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block' }}>No meters yet</span>
-                      )}
-                    </td>
+                {summaryList.map(g => {
+                  const isYearCompleted = g.isCapReached && (Number(g.pendingSettlement) || 0) <= 0 && (Number(g.totalSettled) || 0) >= (Number(g.annualRoiMilestone) || 0);
+                  const isCapHitPending = g.isCapReached && (Number(g.pendingSettlement) || 0) > 0;
 
-                    {/* Investor User */}
-                    <td style={{ padding: '12px 14px', color: '#e2e8f0' }}>
-                      {g.investorUsername ? (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(56, 189, 248, 0.12)', color: '#38bdf8', padding: '2px 8px', borderRadius: '4px', fontSize: '0.76rem' }}>
-                          <UserCheck size={12} /> @{g.investorUsername}
+                  return (
+                    <tr key={g.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                      {/* Name */}
+                      <td style={{ padding: '12px 14px', fontWeight: 600, color: '#fff' }}>
+                        {g.name}
+                        {g.meterCount > 0 ? (
+                          <span style={{ fontSize: '0.72rem', color: '#10b981', display: 'block' }}>âš¡ {g.meterCount} Meters</span>
+                        ) : (
+                          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block' }}>No meters yet</span>
+                        )}
+                      </td>
+
+                      {/* Investor User */}
+                      <td style={{ padding: '12px 14px', color: '#e2e8f0' }}>
+                        {g.investorUsername ? (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(56, 189, 248, 0.12)', color: '#38bdf8', padding: '2px 8px', borderRadius: '4px', fontSize: '0.76rem' }}>
+                            <UserCheck size={12} /> @{g.investorUsername}
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>Unlinked</span>
+                        )}
+                      </td>
+
+                      {/* Capital & Cap */}
+                      <td style={{ padding: '12px 14px', color: '#fff' }}>
+                        <div>{formatNaira(g.investorsCapital)}</div>
+                        <span style={{ fontSize: '0.74rem', color: '#10b981', fontWeight: 600 }}>
+                          Cap: {formatNaira(g.annualRoiMilestone)} ({g.roiPercentage}%)
                         </span>
-                      ) : (
-                        <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>Unlinked</span>
-                      )}
-                    </td>
+                      </td>
 
-                    {/* Capital */}
-                    <td style={{ padding: '12px 14px', color: '#fff' }}>
-                      {formatNaira(g.investorsCapital)}
-                    </td>
-
-                    {/* Annual Cap */}
-                    <td style={{ padding: '12px 14px', color: '#10b981', fontWeight: 600 }}>
-                      {formatNaira(g.annualRoiMilestone)}
-                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block' }}>{g.roiPercentage}% ROI</span>
-                    </td>
-
-                    {/* Gross Meter Top-ups */}
-                    <td style={{ padding: '12px 14px', color: '#fff' }}>
-                      {formatNaira(g.grossYear)}
-                    </td>
-
-                    {/* Share Rate */}
-                    <td style={{ padding: '12px 14px', color: '#f59e0b', fontWeight: 600 }}>
-                      {g.remittanceSharePercent || 100}%
-                    </td>
-
-                    {/* Investor Capped Yield */}
-                    <td style={{ padding: '12px 14px', color: '#a78bfa', fontWeight: 700 }}>
-                      {formatNaira(g.remittedYear)}
-                      {g.isCapReached && (
-                        <span style={{ fontSize: '0.7rem', color: '#10b981', display: 'flex', alignItems: 'center', gap: '2px', marginTop: '2px' }}>
-                          <Award size={10} /> 15% Cap Hit
+                      {/* Generated This Month to Pay */}
+                      <td style={{ padding: '12px 14px' }}>
+                        <div style={{ fontSize: '0.96rem', fontWeight: 800, color: g.remittedMonth > 0 ? '#38bdf8' : 'var(--text-muted)' }}>
+                          {formatNaira(g.remittedMonth)}
+                        </div>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block' }}>
+                          {g.isCapReached && g.remittedMonth === 0 ? 'Annual cap met' : `From ${formatNaira(g.grossMonth)} top-ups`}
                         </span>
-                      )}
-                    </td>
+                      </td>
 
-                    {/* Total Settled */}
-                    <td style={{ padding: '12px 14px', color: 'var(--text-muted)' }}>
-                      {formatNaira(g.totalSettled)}
-                    </td>
+                      {/* Year Capped Yield */}
+                      <td style={{ padding: '12px 14px', color: '#a78bfa', fontWeight: 700 }}>
+                        {formatNaira(g.remittedYear)}
+                        {g.isCapReached && (
+                          <span style={{ fontSize: '0.7rem', color: '#10b981', display: 'flex', alignItems: 'center', gap: '2px', marginTop: '2px' }}>
+                            <Award size={10} /> Annual Cap Met
+                          </span>
+                        )}
+                      </td>
 
-                    {/* NET DUE TO INVESTOR */}
-                    <td style={{ padding: '12px 14px' }}>
-                      <span style={{
-                        display: 'inline-block',
-                        padding: '4px 10px',
-                        borderRadius: '6px',
-                        fontWeight: 800,
-                        fontSize: '0.92rem',
-                        background: g.pendingSettlement > 0 ? 'rgba(245, 158, 11, 0.18)' : 'rgba(16, 185, 129, 0.12)',
-                        color: g.pendingSettlement > 0 ? '#fbbf24' : '#10b981',
-                        border: `1px solid ${g.pendingSettlement > 0 ? 'rgba(245, 158, 11, 0.4)' : 'rgba(16, 185, 129, 0.3)'}`
-                      }}>
-                        {formatNaira(g.pendingSettlement)}
-                      </span>
-                    </td>
+                      {/* Total Settled */}
+                      <td style={{ padding: '12px 14px', color: 'var(--text-muted)' }}>
+                        {formatNaira(g.totalSettled)}
+                      </td>
 
-                    {/* Action */}
-                    <td style={{ padding: '12px 14px', textAlign: 'center' }}>
-                      <button
-                        onClick={() => handleOpenPayout(g)}
-                        className="action-btn"
-                        style={{
-                          background: g.pendingSettlement > 0 ? 'var(--primary-accent)' : 'transparent',
-                          color: g.pendingSettlement > 0 ? '#000' : 'var(--text-muted)',
-                          borderColor: g.pendingSettlement > 0 ? 'var(--primary-accent)' : 'var(--border-color)',
-                          fontSize: '0.78rem',
-                          padding: '6px 12px',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px'
-                        }}
-                      >
-                        <DollarSign size={14} /> Pay Investor
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                      {/* NET DUE TO INVESTOR */}
+                      <td style={{ padding: '12px 14px' }}>
+                        <span style={{
+                          display: 'inline-block',
+                          padding: '4px 10px',
+                          borderRadius: '6px',
+                          fontWeight: 800,
+                          fontSize: '0.92rem',
+                          background: g.pendingSettlement > 0 ? 'rgba(245, 158, 11, 0.18)' : 'rgba(16, 185, 129, 0.12)',
+                          color: g.pendingSettlement > 0 ? '#fbbf24' : '#10b981',
+                          border: `1px solid ${g.pendingSettlement > 0 ? 'rgba(245, 158, 11, 0.4)' : 'rgba(16, 185, 129, 0.3)'}`
+                        }}>
+                          {formatNaira(g.pendingSettlement)}
+                        </span>
+                      </td>
+
+                      {/* Payment Schedule & Status Indicator */}
+                      <td style={{ padding: '12px 14px' }}>
+                        {isYearCompleted ? (
+                          <div>
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              background: 'rgba(16, 185, 129, 0.15)',
+                              color: '#10b981',
+                              padding: '3px 8px',
+                              borderRadius: '4px',
+                              fontSize: '0.76rem',
+                              fontWeight: 700
+                            }}>
+                              <CheckCircle2 size={12} /> Full Year Paid
+                            </span>
+                            <span style={{ fontSize: '0.72rem', color: '#10b981', display: 'block', marginTop: '2px' }}>
+                              100% Settled for {currentYear}
+                            </span>
+                          </div>
+                        ) : isCapHitPending ? (
+                          <div>
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              background: 'rgba(245, 158, 11, 0.15)',
+                              color: '#f59e0b',
+                              padding: '3px 8px',
+                              borderRadius: '4px',
+                              fontSize: '0.76rem',
+                              fontWeight: 700
+                            }}>
+                              <AlertCircle size={12} /> Final Balance Due
+                            </span>
+                            <span style={{ fontSize: '0.72rem', color: '#fbbf24', display: 'block', marginTop: '2px' }}>
+                              Pay {formatNaira(g.pendingSettlement)} to close year
+                            </span>
+                          </div>
+                        ) : (
+                          <div>
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              background: 'rgba(56, 189, 248, 0.15)',
+                              color: '#38bdf8',
+                              padding: '3px 8px',
+                              borderRadius: '4px',
+                              fontSize: '0.76rem',
+                              fontWeight: 600
+                            }}>
+                              <Clock size={12} /> Due: {currentMonthName} {endOfMonth.getDate()}
+                            </span>
+                            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block', marginTop: '2px' }}>
+                              {daysUntilMonthEnd === 0 ? 'Month-end due today' : `${daysUntilMonthEnd} days remaining`}
+                            </span>
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Action */}
+                      <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                        {isYearCompleted ? (
+                          <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: '6px 12px',
+                            borderRadius: '6px',
+                            fontSize: '0.76rem',
+                            fontWeight: 600,
+                            background: 'rgba(16, 185, 129, 0.1)',
+                            color: '#10b981',
+                            border: '1px solid rgba(16, 185, 129, 0.3)'
+                          }}>
+                            <CheckCircle2 size={13} /> Completed
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => handleOpenPayout(g)}
+                            className="action-btn"
+                            style={{
+                              background: g.pendingSettlement > 0 ? 'var(--primary-accent)' : 'transparent',
+                              color: g.pendingSettlement > 0 ? '#000' : 'var(--text-muted)',
+                              borderColor: g.pendingSettlement > 0 ? 'var(--primary-accent)' : 'var(--border-color)',
+                              fontSize: '0.78rem',
+                              padding: '6px 12px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px'
+                            }}
+                          >
+                            <DollarSign size={14} /> Pay Investor
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </div>
 
-      {/* ─── Payout / Settlement Modal ───────────────────────────────── */}
+      {/* â”€â”€â”€ Payout / Settlement Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       {selectedGroup && (
         <div style={{
           position: 'fixed',
@@ -397,15 +492,19 @@ export default function InvestorAdminSection({ formatNaira }) {
             {/* Payout Summary Box */}
             <div style={{ background: 'rgba(255, 255, 255, 0.03)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '14px', marginBottom: '20px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '0.84rem' }}>
-                <span style={{ color: 'var(--text-muted)' }}>Agreed Annual Target (15%):</span>
+                <span style={{ color: 'var(--text-muted)' }}>Agreed Annual Target:</span>
                 <span style={{ color: '#10b981', fontWeight: 600 }}>{formatNaira(selectedGroup.annualRoiMilestone)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '0.84rem' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Generated This Month ({currentMonthName}):</span>
+                <span style={{ color: '#38bdf8', fontWeight: 600 }}>{formatNaira(selectedGroup.remittedMonth)}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '0.84rem' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Eligible Earned to Date:</span>
                 <span style={{ color: '#a78bfa', fontWeight: 600 }}>{formatNaira(selectedGroup.remittedYear)}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '0.84rem' }}>
-                <span style={{ color: 'var(--text-muted)' }}>Already Settled:</span>
+                <span style={{ color: 'var(--text-muted)' }}>Already Settled / Paid Out:</span>
                 <span style={{ color: '#fff' }}>{formatNaira(selectedGroup.totalSettled)}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.06)', fontSize: '0.95rem', fontWeight: 800 }}>
@@ -431,7 +530,7 @@ export default function InvestorAdminSection({ formatNaira }) {
             <form onSubmit={handleRecordPayout} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '6px', fontWeight: 600 }}>
-                  Payout Amount (₦) <span style={{ color: '#fbbf24' }}>(Auto-filled to exact balance)</span>
+                  Payout Amount (â‚¦) <span style={{ color: '#fbbf24' }}>(Auto-filled to exact balance)</span>
                 </label>
                 <input
                   type="number"
@@ -520,3 +619,4 @@ export default function InvestorAdminSection({ formatNaira }) {
     </div>
   );
 }
+

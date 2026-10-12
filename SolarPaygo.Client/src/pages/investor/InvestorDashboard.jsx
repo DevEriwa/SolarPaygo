@@ -161,7 +161,7 @@ export default function InvestorDashboard({ handleLogout }) {
         </div>
       </div>
 
-      {/* ─── 15% Annual Cap Notification Banner (When cap is reached) ──── */}
+      {/* ─── Target Annual Cap Notification Banner (When cap is reached) ──── */}
       {fin.isCapReached && (
         <div
           style={{
@@ -183,13 +183,10 @@ export default function InvestorDashboard({ handleLogout }) {
             </div>
             <div>
               <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#34d399', marginBottom: '2px' }}>
-                Annual 15% Target Yield Milestone Satisfied ({formatNaira(fin.annualRoiMilestone)})
+                Annual {fin.roiPercentage || 0}% Target Yield Milestone Satisfied ({formatNaira(fin.annualRoiMilestone)})
               </h3>
               <p style={{ color: '#e5e7eb', fontSize: '0.86rem', lineHeight: 1.4 }}>
-                Your agreed 15% annual return of <strong>{formatNaira(fin.annualRoiMilestone)}</strong> has been completely fulfilled from customer collections.
-                {fin.companySurplusYear > 0 && (
-                  <span> Subsequent meter collections ({formatNaira(fin.companySurplusYear)}) are retained by IDIASCO until the next annual cycle renews.</span>
-                )}
+                Your agreed {fin.roiPercentage || 0}% annual return of <strong>{formatNaira(fin.annualRoiMilestone)}</strong> has been completely fulfilled from customer collections.
               </p>
             </div>
           </div>
@@ -234,11 +231,11 @@ export default function InvestorDashboard({ handleLogout }) {
             {formatNaira(fin.annualRoiMilestone)}
           </div>
           <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '6px' }}>
-            {group.isReturnCapital ? 'Adjusted 10% exit rate' : 'Auto-renews indefinitely every year'}
+            {group.isReturnCapital ? 'Adjusted exit rate' : 'Auto-renews indefinitely every year'}
           </div>
         </div>
 
-        {/* Card 3: Year Cash Flow Remitted (Strictly Capped at 15%) */}
+        {/* Card 3: Year Cash Flow Remitted (Strictly Capped at Annual ROI) */}
         <div className="glass-panel" style={{ padding: '20px', position: 'relative', overflow: 'hidden' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
@@ -268,11 +265,6 @@ export default function InvestorDashboard({ handleLogout }) {
                 }}
               />
             </div>
-            {fin.companySurplusYear > 0 && (
-              <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: '6px' }}>
-                Platform Retained Surplus: {formatNaira(fin.companySurplusYear)}
-              </div>
-            )}
           </div>
         </div>
 
@@ -386,7 +378,9 @@ export default function InvestorDashboard({ handleLogout }) {
               {formatNaira(periodRemitted)}
             </div>
             <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-              {cycleTab === 'yearly' && fin.isCapReached ? '15% Annual Target Cap Satisfied' : 'Directly credited to your portfolio pool'}
+              {fin.isCapReached && periodRemitted === 0
+                ? `Target Annual Yield (${fin.roiPercentage || 0}%) Milestone Satisfied`
+                : (cycleTab === 'yearly' && fin.isCapReached ? `Annual Yield (${fin.roiPercentage || 0}%) Satisfied` : 'Directly credited to your portfolio pool')}
             </div>
           </div>
 
@@ -412,7 +406,7 @@ export default function InvestorDashboard({ handleLogout }) {
               {group.remittanceSharePercent || 100}%
             </div>
             <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-              Portion routed till 15% annual ROI is achieved
+              Portion routed till {fin.roiPercentage || 0}% annual ROI is achieved
             </div>
           </div>
 
@@ -536,7 +530,7 @@ export default function InvestorDashboard({ handleLogout }) {
                   <th style={{ padding: '10px 14px' }}>Meter</th>
                   <th style={{ padding: '10px 14px' }}>Customer</th>
                   <th style={{ padding: '10px 14px' }}>Gross Payment</th>
-                  <th style={{ padding: '10px 14px' }}>Capture Share</th>
+                  <th style={{ padding: '10px 14px' }}>Investor Share</th>
                   <th style={{ padding: '10px 14px' }}>Status</th>
                 </tr>
               </thead>
@@ -549,9 +543,26 @@ export default function InvestorDashboard({ handleLogout }) {
                     <td style={{ padding: '10px 14px', fontWeight: 600, color: '#fff' }}>{t.hardwareId}</td>
                     <td style={{ padding: '10px 14px', color: '#e2e8f0' }}>{t.customerName}</td>
                     <td style={{ padding: '10px 14px', color: '#fff' }}>{formatNaira(t.grossAmount)}</td>
-                    <td style={{ padding: '10px 14px', color: '#10b981', fontWeight: 700 }}>{formatNaira(t.investorShareAmount)}</td>
                     <td style={{ padding: '10px 14px' }}>
-                      <span style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', padding: '2px 8px', borderRadius: '4px', fontSize: '0.74rem' }}>
+                      {t.investorShareAmount > 0 ? (
+                        <span style={{ color: '#10b981', fontWeight: 700 }}>+{formatNaira(t.investorShareAmount)}</span>
+                      ) : (
+                        <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>₦0</span>
+                      )}
+                    </td>
+                    <td style={{ padding: '10px 14px' }}>
+                      <span style={{
+                        background: t.status === 'Completed'
+                          ? 'rgba(16, 185, 129, 0.15)'
+                          : (t.status === 'Cap Reached' ? 'rgba(148, 163, 184, 0.15)' : 'rgba(245, 158, 11, 0.15)'),
+                        color: t.status === 'Completed'
+                          ? '#10b981'
+                          : (t.status === 'Cap Reached' ? '#94a3b8' : '#f59e0b'),
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        fontSize: '0.74rem',
+                        fontWeight: 600
+                      }}>
                         {t.status}
                       </span>
                     </td>
