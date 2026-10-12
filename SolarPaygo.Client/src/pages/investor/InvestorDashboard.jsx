@@ -94,28 +94,26 @@ export default function InvestorDashboard({ handleLogout }) {
   const activeMeterCount = meters.filter(m => m.status === 'Active').length;
   const totalPowerW = meters.reduce((sum, m) => sum + (Number(m.power) || 0), 0);
 
-  // Period earnings selection calculations
-  let periodGross = 0;
+  // Period earnings selection calculations (Strictly investor yield, never company gross)
   let periodRemitted = 0;
-  let periodTitle = "This Month's Collections";
+  let periodTitle = "This Month's Remittance";
 
   if (cycleTab === 'daily') {
-    periodGross = fin.grossToday || 0;
     periodRemitted = fin.remittedToday || 0;
-    periodTitle = "Today's Collections";
+    periodTitle = "Today's Remittance";
   } else if (cycleTab === 'weekly') {
-    periodGross = fin.grossWeek || 0;
     periodRemitted = fin.remittedWeek || 0;
-    periodTitle = "This Week's Collections";
+    periodTitle = "This Week's Remittance";
   } else if (cycleTab === 'monthly') {
-    periodGross = fin.grossMonth || 0;
     periodRemitted = fin.remittedMonth || 0;
-    periodTitle = "This Month's Collections";
+    periodTitle = "This Month's Remittance";
   } else if (cycleTab === 'yearly') {
-    periodGross = fin.grossYear || 0;
     periodRemitted = fin.remittedYear || 0;
-    periodTitle = "Current Year Remitted (Capped)";
+    periodTitle = "Current Year Remittance (Capped)";
   }
+
+  // Filter to only include cash flows that directly credited this investor
+  const eligibleTransactions = recentTx.filter(t => (Number(t.remittanceCredited || t.investorShareAmount) || 0) > 0);
 
   return (
     <div style={{ padding: '24px 32px', maxWidth: '1440px', margin: '0 auto' }}>
@@ -183,10 +181,10 @@ export default function InvestorDashboard({ handleLogout }) {
             </div>
             <div>
               <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#34d399', marginBottom: '2px' }}>
-                Annual {fin.roiPercentage || 0}% Target Yield Milestone Satisfied ({formatNaira(fin.annualRoiMilestone)})
+                Annual Target Yield Milestone Satisfied ({formatNaira(fin.annualRoiMilestone)})
               </h3>
               <p style={{ color: '#e5e7eb', fontSize: '0.86rem', lineHeight: 1.4 }}>
-                Your agreed {fin.roiPercentage || 0}% annual return of <strong>{formatNaira(fin.annualRoiMilestone)}</strong> has been completely fulfilled from customer collections.
+                Your agreed annual return of <strong>{formatNaira(fin.annualRoiMilestone)}</strong> has been completely fulfilled for this cycle.
               </p>
             </div>
           </div>
@@ -295,10 +293,10 @@ export default function InvestorDashboard({ handleLogout }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '20px' }}>
           <div>
             <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <PieChart size={20} color="var(--primary-accent)" /> Cash Flow Aggregation & Distribution
+              <PieChart size={20} color="var(--primary-accent)" /> Cash Flow Aggregation & Yield
             </h3>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.84rem', marginTop: '2px' }}>
-              Continuous cash flow captured by the billing engine from end-user credit purchases ({group.remittanceSharePercent || 100}% share rate).
+              Direct cash flow remittances credited to your portfolio.
             </p>
           </div>
 
@@ -367,7 +365,7 @@ export default function InvestorDashboard({ handleLogout }) {
           </div>
         </div>
 
-        {/* Dynamic Period Metrics Breakdown */}
+        {/* Dynamic Period Metrics Breakdown (Strictly Investor Figures) */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
           {/* Metric 1: Selected Period Investor Remittance */}
           <div style={{ background: 'rgba(255, 255, 255, 0.02)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
@@ -379,34 +377,34 @@ export default function InvestorDashboard({ handleLogout }) {
             </div>
             <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '4px' }}>
               {fin.isCapReached && periodRemitted === 0
-                ? `Target Annual Yield (${fin.roiPercentage || 0}%) Milestone Satisfied`
-                : (cycleTab === 'yearly' && fin.isCapReached ? `Annual Yield (${fin.roiPercentage || 0}%) Satisfied` : 'Directly credited to your portfolio pool')}
+                ? 'Target Annual Yield Milestone Satisfied'
+                : (cycleTab === 'yearly' && fin.isCapReached ? 'Annual Yield Satisfied' : 'Directly credited to your portfolio pool')}
             </div>
           </div>
 
-          {/* Metric 2: Gross Collections from Meters in Period */}
+          {/* Metric 2: Annual Target Cap */}
           <div style={{ background: 'rgba(255, 255, 255, 0.02)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
             <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
-              Gross Meter Top-ups ({cycleTab.toUpperCase()})
+              Target Annual Milestone
             </div>
             <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#fff', marginTop: '6px' }}>
-              {formatNaira(periodGross)}
+              {formatNaira(fin.annualRoiMilestone)}
             </div>
             <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-              Total purchases by customers on your meters
+              Agreed annual yield return
             </div>
           </div>
 
-          {/* Metric 3: Revenue Capture Share */}
+          {/* Metric 3: Remittance Share Rate */}
           <div style={{ background: 'rgba(255, 255, 255, 0.02)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
             <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
-              Revenue Capture Share
+              Remittance Share Allocation
             </div>
             <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#f59e0b', marginTop: '6px' }}>
               {group.remittanceSharePercent || 100}%
             </div>
             <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-              Portion routed till {fin.roiPercentage || 0}% annual ROI is achieved
+              Active revenue sharing rate
             </div>
           </div>
 
@@ -433,7 +431,7 @@ export default function InvestorDashboard({ handleLogout }) {
               <Zap size={20} color="var(--primary-accent)" /> Deployed Infrastructure Assets ({meters.length})
             </h3>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.84rem', marginTop: '2px' }}>
-              Meters generating continuous revenue within this investment group tab.
+              Active energy generation units linked to your portfolio.
             </p>
           </div>
           <div style={{ display: 'flex', gap: '12px' }}>
@@ -448,7 +446,7 @@ export default function InvestorDashboard({ handleLogout }) {
 
         {meters.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-            No meters assigned to this group yet. As administrators assign equipment, they will automatically appear here.
+            No meters assigned to this group yet.
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
@@ -456,10 +454,9 @@ export default function InvestorDashboard({ handleLogout }) {
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', textAlign: 'left' }}>
                   <th style={{ padding: '12px 14px' }}>Hardware / Meter ID</th>
-                  <th style={{ padding: '12px 14px' }}>Customer</th>
+                  <th style={{ padding: '12px 14px' }}>Customer / Site</th>
                   <th style={{ padding: '12px 14px' }}>Status</th>
-                  <th style={{ padding: '12px 14px' }}>Units Avail</th>
-                  <th style={{ padding: '12px 14px' }}>Prepaid Bal</th>
+                  <th style={{ padding: '12px 14px' }}>Energy Balance</th>
                   <th style={{ padding: '12px 14px' }}>Total kWh</th>
                   <th style={{ padding: '12px 14px' }}>Live Power</th>
                   <th style={{ padding: '12px 14px' }}>Relay</th>
@@ -486,7 +483,6 @@ export default function InvestorDashboard({ handleLogout }) {
                       </span>
                     </td>
                     <td style={{ padding: '12px 14px', color: '#fff' }}>{(Number(m.availableUnits) || 0).toFixed(1)} kWh</td>
-                    <td style={{ padding: '12px 14px', color: '#10b981', fontWeight: 600 }}>{formatNaira(m.prepaidNairaBalance)}</td>
                     <td style={{ padding: '12px 14px', color: 'var(--text-muted)' }}>{(Number(m.cumulativeKwhConsumed) || 0).toFixed(1)} kWh</td>
                     <td style={{ padding: '12px 14px', color: '#38bdf8' }}>{Number(m.power) || 0} W</td>
                     <td style={{ padding: '12px 14px' }}>
@@ -508,18 +504,18 @@ export default function InvestorDashboard({ handleLogout }) {
         )}
       </div>
 
-      {/* ─── Recent Meter Remittance Cash Flows ───────────────────────── */}
+      {/* ─── Recent Meter Remittance Cash Flows (Only Direct Yield) ── */}
       <div className="glass-panel" style={{ padding: '24px', marginBottom: '28px' }}>
         <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#fff', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <TrendingUp size={20} color="var(--primary-accent)" /> Recent Remittance Cash Flows
         </h3>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.84rem', marginBottom: '16px' }}>
-          Every kobo spent by end-users on energy credits captured and credited to this portfolio.
+          Direct remittances credited to your investment portfolio from energy operations.
         </p>
 
-        {recentTx.length === 0 ? (
+        {eligibleTransactions.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-            No recent payments recorded on meters in this portfolio group yet.
+            No remittance cash flows recorded for this portfolio yet.
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
@@ -527,43 +523,31 @@ export default function InvestorDashboard({ handleLogout }) {
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', textAlign: 'left' }}>
                   <th style={{ padding: '10px 14px' }}>Date</th>
-                  <th style={{ padding: '10px 14px' }}>Meter</th>
-                  <th style={{ padding: '10px 14px' }}>Customer</th>
-                  <th style={{ padding: '10px 14px' }}>Gross Payment</th>
-                  <th style={{ padding: '10px 14px' }}>Investor Share</th>
+                  <th style={{ padding: '10px 14px' }}>Meter / Asset</th>
+                  <th style={{ padding: '10px 14px' }}>Remittance Credited</th>
                   <th style={{ padding: '10px 14px' }}>Status</th>
                 </tr>
               </thead>
               <tbody>
-                {recentTx.map(t => (
+                {eligibleTransactions.map(t => (
                   <tr key={t.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                     <td style={{ padding: '10px 14px', color: 'var(--text-muted)' }}>
                       {new Date(t.transactionDate).toLocaleDateString()} {new Date(t.transactionDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </td>
                     <td style={{ padding: '10px 14px', fontWeight: 600, color: '#fff' }}>{t.hardwareId}</td>
-                    <td style={{ padding: '10px 14px', color: '#e2e8f0' }}>{t.customerName}</td>
-                    <td style={{ padding: '10px 14px', color: '#fff' }}>{formatNaira(t.grossAmount)}</td>
-                    <td style={{ padding: '10px 14px' }}>
-                      {t.investorShareAmount > 0 ? (
-                        <span style={{ color: '#10b981', fontWeight: 700 }}>+{formatNaira(t.investorShareAmount)}</span>
-                      ) : (
-                        <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>₦0</span>
-                      )}
+                    <td style={{ padding: '10px 14px', color: '#10b981', fontWeight: 700, fontSize: '0.95rem' }}>
+                      +{formatNaira(t.remittanceCredited || t.investorShareAmount)}
                     </td>
                     <td style={{ padding: '10px 14px' }}>
                       <span style={{
-                        background: t.status === 'Completed'
-                          ? 'rgba(16, 185, 129, 0.15)'
-                          : (t.status === 'Cap Reached' ? 'rgba(148, 163, 184, 0.15)' : 'rgba(245, 158, 11, 0.15)'),
-                        color: t.status === 'Completed'
-                          ? '#10b981'
-                          : (t.status === 'Cap Reached' ? '#94a3b8' : '#f59e0b'),
+                        background: 'rgba(16, 185, 129, 0.15)',
+                        color: '#10b981',
                         padding: '2px 8px',
                         borderRadius: '4px',
                         fontSize: '0.74rem',
                         fontWeight: 600
                       }}>
-                        {t.status}
+                        Credited to Portfolio
                       </span>
                     </td>
                   </tr>

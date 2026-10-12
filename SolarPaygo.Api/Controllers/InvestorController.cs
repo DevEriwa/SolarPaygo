@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SolarPaygo.Api.Data;
@@ -23,7 +23,7 @@ namespace SolarPaygo.Api.Controllers
             _context = context;
         }
 
-        // GET /api/investor/portfolio — Fetch complete portfolio metrics for investor
+        // GET /api/investor/portfolio â€” Fetch complete portfolio metrics for investor
         [Authorize(Roles = "Investor,Admin,SuperAdmin")]
         [HttpGet("portfolio")]
         public async Task<IActionResult> GetPortfolio([FromQuery] int? groupId)
@@ -169,17 +169,19 @@ namespace SolarPaygo.Api.Controllers
 
                 var meter = systems.FirstOrDefault(s => s.Id == t.SolarSystemId);
 
-                processedTransactions.Add(new
+                if (eligibleTxShare > 0)
                 {
-                    t.Id,
-                    t.SolarSystemId,
-                    HardwareId = meter?.HardwareId ?? "Meter",
-                    CustomerName = meter?.OwnerName ?? "Customer",
-                    GrossAmount = t.AmountPaid,
-                    InvestorShareAmount = eligibleTxShare,
-                    t.TransactionDate,
-                    Status = statusText
-                });
+                    processedTransactions.Add(new
+                    {
+                        t.Id,
+                        t.SolarSystemId,
+                        HardwareId = meter?.HardwareId ?? "Meter",
+                        RemittanceCredited = eligibleTxShare,
+                        InvestorShareAmount = eligibleTxShare,
+                        t.TransactionDate,
+                        Status = "Credited"
+                    });
+                }
             }
 
             bool isCapReached = annualRoiMilestone > 0 && remittedYear >= annualRoiMilestone;
@@ -284,7 +286,7 @@ namespace SolarPaygo.Api.Controllers
             });
         }
 
-        // GET /api/investor/admin-summary — Complete portfolio and payout status for Admin
+        // GET /api/investor/admin-summary â€” Complete portfolio and payout status for Admin
         [Authorize(Roles = "Admin,SuperAdmin")]
         [HttpGet("admin-summary")]
         public async Task<IActionResult> GetAdminSummary()
@@ -436,7 +438,7 @@ namespace SolarPaygo.Api.Controllers
             return Ok(summaryList);
         }
 
-        // POST /api/investor/settle — Admin records manual payout/settlement
+        // POST /api/investor/settle â€” Admin records manual payout/settlement
         [Authorize(Roles = "Admin,SuperAdmin")]
         [HttpPost("settle")]
         public async Task<IActionResult> RecordSettlement([FromBody] RecordSettlementRequest request)
@@ -475,3 +477,4 @@ namespace SolarPaygo.Api.Controllers
         }
     }
 }
+
