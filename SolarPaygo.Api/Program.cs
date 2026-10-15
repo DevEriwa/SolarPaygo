@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -309,6 +309,11 @@ using (var scope = app.Services.CreateScope())
             IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('DeviceGroups') AND name = 'SettlementCycle')
             BEGIN
                 ALTER TABLE DeviceGroups ADD SettlementCycle NVARCHAR(50) NOT NULL DEFAULT 'Monthly';
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('DeviceGroups') AND name = 'InvestmentStartDate')
+            BEGIN
+                ALTER TABLE DeviceGroups ADD InvestmentStartDate DATETIME2 NULL;
             END
 
             IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('DeviceGroups') AND name = 'IsReturnCapital')

@@ -61,6 +61,7 @@ namespace SolarPaygo.Api.Controllers
                 g.RoiPercentage,
                 g.RemittanceSharePercent,
                 g.SettlementCycle,
+                g.InvestmentStartDate,
                 g.IsReturnCapital,
                 g.ExitNoticeDate,
                 g.ExitTargetDate,
@@ -120,6 +121,7 @@ namespace SolarPaygo.Api.Controllers
                 RoiPercentage = roi,
                 RemittanceSharePercent = share,
                 SettlementCycle = cycle,
+                InvestmentStartDate = request.InvestmentStartDate,
                 IsReturnCapital = request.IsReturnCapital,
                 ExitNoticeDate = exitNotice,
                 ExitTargetDate = exitTarget,
@@ -194,6 +196,7 @@ namespace SolarPaygo.Api.Controllers
             group.IsRoiEnabled = request.IsRoiEnabled;
             group.RemittanceSharePercent = request.RemittanceSharePercent > 0 ? request.RemittanceSharePercent : 100m;
             group.SettlementCycle = !string.IsNullOrWhiteSpace(request.SettlementCycle) ? request.SettlementCycle : "Monthly";
+            group.InvestmentStartDate = request.InvestmentStartDate;
             group.IsReturnCapital = request.IsReturnCapital;
             group.IsAccountClosed = request.IsAccountClosed;
 
@@ -318,6 +321,9 @@ namespace SolarPaygo.Api.Controllers
             public decimal RoiPercentage { get; set; } = 15m;
             public decimal RemittanceSharePercent { get; set; } = 100m;
             public string SettlementCycle { get; set; } = "Monthly";
+
+            // Investment Start Date anchor
+            public DateTime? InvestmentStartDate { get; set; }
 
             // Exit Governance
             public bool IsReturnCapital { get; set; } = false;

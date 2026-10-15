@@ -20,6 +20,99 @@ const subFieldLabel = {
   fontWeight: 600
 };
 
+const MONTHS = [
+  { val: '01', name: 'Jan (01)' },
+  { val: '02', name: 'Feb (02)' },
+  { val: '03', name: 'Mar (03)' },
+  { val: '04', name: 'Apr (04)' },
+  { val: '05', name: 'May (05)' },
+  { val: '06', name: 'Jun (06)' },
+  { val: '07', name: 'Jul (07)' },
+  { val: '08', name: 'Aug (08)' },
+  { val: '09', name: 'Sep (09)' },
+  { val: '10', name: 'Oct (10)' },
+  { val: '11', name: 'Nov (11)' },
+  { val: '12', name: 'Dec (12)' }
+];
+
+function DateInputGroup({ value, onChange }) {
+  const parts = (value || '').split('-');
+  const year = parts[0] || '';
+  const month = parts[1] || '';
+  const day = parts[2] ? parts[2].substring(0, 2) : '';
+
+  const update = (newDay, newMonth, newYear) => {
+    if (!newDay && !newMonth && !newYear) {
+      onChange('');
+      return;
+    }
+    const d = newDay || day || '01';
+    const m = newMonth || month || '01';
+    const y = newYear || year || String(new Date().getFullYear());
+    onChange(`${y}-${m}-${d}`);
+  };
+
+  const preview = value ? (() => {
+    try {
+      const [y, m, d] = value.split('-');
+      const mObj = MONTHS.find(x => x.val === m);
+      return `${parseInt(d, 10)} ${mObj ? mObj.name.split(' ')[0] : m} ${y}`;
+    } catch {
+      return '';
+    }
+  })() : '';
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      <label style={subFieldLabel}>Investment Start Date (Day / Month / Year)</label>
+      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+        {/* Day Select */}
+        <select
+          style={{ ...fieldStyle, width: '70px', padding: '8px 6px', textAlign: 'center' }}
+          value={day}
+          onChange={e => update(e.target.value, month, year)}
+        >
+          <option value="">Day</option>
+          {Array.from({ length: 31 }, (_, i) => {
+            const v = String(i + 1).padStart(2, '0');
+            return <option key={v} value={v}>{v}</option>;
+          })}
+        </select>
+
+        {/* Month Select */}
+        <select
+          style={{ ...fieldStyle, width: '115px', padding: '8px 6px' }}
+          value={month}
+          onChange={e => update(day, e.target.value, year)}
+        >
+          <option value="">Month</option>
+          {MONTHS.map(m => (
+            <option key={m.val} value={m.val}>{m.name}</option>
+          ))}
+        </select>
+
+        {/* Year Select */}
+        <select
+          style={{ ...fieldStyle, width: '85px', padding: '8px 6px', textAlign: 'center' }}
+          value={year}
+          onChange={e => update(day, month, e.target.value)}
+        >
+          <option value="">Year</option>
+          {Array.from({ length: 16 }, (_, i) => {
+            const y = String(2020 + i);
+            return <option key={y} value={y}>{y}</option>;
+          })}
+        </select>
+      </div>
+      {preview && (
+        <div style={{ fontSize: '0.73rem', color: '#38bdf8', marginTop: '4px', fontWeight: 600 }}>
+          📅 {preview} (Cycle begins on this date)
+        </div>
+      )}
+    </div>
+  );
+}
+
 function formatNaira(val) {
   if (!val && val !== 0) return '₦0';
   return '₦' + Number(val).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -38,6 +131,11 @@ function GroupRow({ group, onChanged }) {
   const [roiPercentage, setRoiPercentage] = useState(group.roiPercentage || 15);
   const [remittanceShare, setRemittanceShare] = useState(group.remittanceSharePercent || 100);
   const [settlementCycle, setSettlementCycle] = useState(group.settlementCycle || 'Monthly');
+
+  // Investment Start Date (Annual Reoccurring Anchor)
+  const [investmentStartDate, setInvestmentStartDate] = useState(
+    group.investmentStartDate ? group.investmentStartDate.split('T')[0] : ''
+  );
 
   // Exit Governance
   const [isReturnCapital, setIsReturnCapital] = useState(!!group.isReturnCapital);
@@ -98,6 +196,7 @@ function GroupRow({ group, onChanged }) {
           roiPercentage: Number(roiPercentage) || 0,
           remittanceSharePercent: Number(remittanceShare) || 100,
           settlementCycle,
+          investmentStartDate: investmentStartDate || null,
           isReturnCapital,
           investorEnabled,
           investorUsername: investorEnabled ? investorUsername : null,
@@ -157,6 +256,12 @@ function GroupRow({ group, onChanged }) {
           </div>
 
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+            {group.investmentStartDate && (
+              <span style={{ fontSize: '0.74rem', background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', padding: '3px 8px', borderRadius: '4px', border: '1px solid rgba(56, 189, 248, 0.3)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <Calendar size={12} /> Start Date: {new Date(group.investmentStartDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} (Reoccurring)
+              </span>
+            )}
+
             {group.isRoiEnabled ? (
               <span style={{ fontSize: '0.74rem', background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', padding: '3px 8px', borderRadius: '4px', border: '1px solid rgba(16, 185, 129, 0.3)', fontWeight: 600 }}>
                 Capital: {formatNaira(group.investorsCapital)} • {group.roiPercentage}% ROI ({formatNaira(Math.round(group.investorsCapital * (group.roiPercentage / 100)))}/yr cap)
@@ -197,39 +302,38 @@ function GroupRow({ group, onChanged }) {
   }
 
   return (
-    <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)', background: 'rgba(255,255,255,.02)' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '10px', alignItems: 'flex-end' }}>
-        <div>
+    <div style={{ padding: '18px', borderBottom: '1px solid var(--border-color)', background: 'rgba(255,255,255,.02)', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      {/* Row 1: Primary Details */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-start' }}>
+        <div style={{ flex: '1 1 200px' }}>
           <label style={subFieldLabel}>Group Name</label>
-          <input style={fieldStyle} value={name} onChange={e => setName(e.target.value)} />
+          <input style={fieldStyle} value={name} onChange={e => setName(e.target.value)} placeholder="e.g. London" />
         </div>
-        <div>
+        <div style={{ flex: '2 1 300px' }}>
+          <label style={subFieldLabel}>Description</label>
+          <input style={fieldStyle} value={description} onChange={e => setDescription(e.target.value)} placeholder="e.g. Distribution for light" />
+        </div>
+        <div style={{ width: '80px' }}>
+          <label style={subFieldLabel}>Order</label>
+          <input style={fieldStyle} type="number" value={order} onChange={e => setOrder(e.target.value)} />
+        </div>
+      </div>
+
+      {/* Row 2: Investment Capital, Date & ROI Governance */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', alignItems: 'flex-start' }}>
+        <div style={{ width: '170px' }}>
           <label style={subFieldLabel}>Investors Capital (₦)</label>
           <input
             style={fieldStyle}
             type="number"
-            placeholder="e.g. 5000000"
+            placeholder="e.g. 10000"
             value={investorsCapital}
             onChange={e => setInvestorsCapital(e.target.value)}
           />
         </div>
-        <div style={{ gridColumn: 'span 2' }}>
-          <label style={subFieldLabel}>Description</label>
-          <input style={fieldStyle} value={description} onChange={e => setDescription(e.target.value)} />
-        </div>
 
-        {/* Return Capital Checkbox */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-          <label style={subFieldLabel}>Return Capital</label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', height: '36px', cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={isReturnCapital}
-              onChange={e => handleReturnCapitalToggle(e.target.checked)}
-            />
-            <span style={{ color: isReturnCapital ? '#f59e0b' : 'var(--text-muted)', fontWeight: 600 }}>12-Mo Notice</span>
-          </label>
-        </div>
+        {/* Unambiguous Day / Month / Year Picker */}
+        <DateInputGroup value={investmentStartDate} onChange={setInvestmentStartDate} />
 
         {/* %ROI Input */}
         <div style={{ width: '85px' }}>
@@ -256,37 +360,48 @@ function GroupRow({ group, onChanged }) {
           </label>
         </div>
 
-        {/* Investor Checkbox */}
+        {/* Return Capital Checkbox */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-          <label style={subFieldLabel}>Investor Account</label>
+          <label style={subFieldLabel}>Return Capital</label>
           <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', height: '36px', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={isReturnCapital}
+              onChange={e => handleReturnCapitalToggle(e.target.checked)}
+            />
+            <span style={{ color: isReturnCapital ? '#f59e0b' : 'var(--text-muted)', fontWeight: 600 }}>12-Mo Notice</span>
+          </label>
+        </div>
+      </div>
+
+      {/* Row 3: Account Toggle & Actions */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', paddingTop: '4px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem', cursor: 'pointer' }}>
             <input
               type="checkbox"
               checked={investorEnabled}
               onChange={e => handleInvestorToggle(e.target.checked)}
             />
-            <span style={{ color: investorEnabled ? '#38bdf8' : 'var(--text-muted)', fontWeight: 600 }}>Login</span>
+            <span style={{ color: investorEnabled ? '#38bdf8' : 'var(--text-muted)', fontWeight: 600 }}>
+              Enable Investor Account Login
+            </span>
           </label>
         </div>
 
-        <div style={{ width: '65px' }}>
-          <label style={subFieldLabel}>Order</label>
-          <input style={fieldStyle} type="number" value={order} onChange={e => setOrder(e.target.value)} />
-        </div>
-
-        <div style={{ display: 'flex', gap: '6px', height: '36px', alignItems: 'center' }}>
-          <button onClick={save} disabled={busy} className="action-btn" style={{ padding: '8px 12px', background: 'var(--primary-accent)', color: 'var(--bg-dark)', borderColor: 'var(--primary-accent)' }}>
-            <Save size={14} /> Save
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button onClick={save} disabled={busy} className="action-btn" style={{ padding: '8px 18px', background: 'var(--primary-accent)', color: 'var(--bg-dark)', borderColor: 'var(--primary-accent)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Save size={15} /> Save
           </button>
-          <button onClick={() => { setEditing(false); setError(''); }} className="action-btn" style={{ padding: '8px 12px' }}>
-            <X size={14} />
+          <button onClick={() => { setEditing(false); setError(''); }} className="action-btn" style={{ padding: '8px 14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <X size={15} /> Cancel
           </button>
         </div>
       </div>
 
       {/* Expanded Investor Credentials & Settings */}
       {investorEnabled && (
-        <div style={{ marginTop: '12px', padding: '12px', borderRadius: '6px', background: 'rgba(56, 189, 248, 0.05)', border: '1px solid rgba(56, 189, 248, 0.2)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', alignItems: 'flex-end' }}>
+        <div style={{ marginTop: '4px', padding: '12px', borderRadius: '6px', background: 'rgba(56, 189, 248, 0.05)', border: '1px solid rgba(56, 189, 248, 0.2)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', alignItems: 'flex-end' }}>
           <div>
             <label style={subFieldLabel}>Investor Username</label>
             <input style={fieldStyle} value={investorUsername} onChange={e => setInvestorUsername(e.target.value)} />
@@ -317,7 +432,7 @@ function GroupRow({ group, onChanged }) {
         </div>
       )}
 
-      {error && <p style={{ color: 'var(--danger)', fontSize: '0.78rem', marginTop: '6px' }}>{error}</p>}
+      {error && <p style={{ color: 'var(--danger)', fontSize: '0.78rem', marginTop: '4px' }}>{error}</p>}
     </div>
   );
 }
@@ -333,6 +448,9 @@ function NewGroupRow({ onCreated, onCancel }) {
   const [roiPercentage, setRoiPercentage] = useState(15);
   const [remittanceShare, setRemittanceShare] = useState(100);
   const [settlementCycle, setSettlementCycle] = useState('Monthly');
+
+  // Investment Start Date (Annual Reoccurring Anchor)
+  const [investmentStartDate, setInvestmentStartDate] = useState('');
 
   // Exit Governance
   const [isReturnCapital, setIsReturnCapital] = useState(false);
@@ -396,10 +514,11 @@ function NewGroupRow({ onCreated, onCancel }) {
           roiPercentage: Number(roiPercentage) || 0,
           remittanceSharePercent: Number(remittanceShare) || 100,
           settlementCycle,
+          investmentStartDate: investmentStartDate || null,
           isReturnCapital,
           investorEnabled,
           investorUsername: investorEnabled ? investorUsername : null,
-          investorPassword: investorEnabled ? investorPassword : null
+          investorPassword: investorEnabled && investorPassword ? investorPassword : null
         })
       });
       const body = await response.json().catch(() => null);
@@ -418,9 +537,10 @@ function NewGroupRow({ onCreated, onCancel }) {
   };
 
   return (
-    <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)', background: 'rgba(255,255,255,.04)' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '10px', alignItems: 'flex-end' }}>
-        <div>
+    <div style={{ padding: '18px', borderBottom: '1px solid var(--border-color)', background: 'rgba(255,255,255,.04)', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      {/* Row 1: Primary Details */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-start' }}>
+        <div style={{ flex: '1 1 200px' }}>
           <label style={subFieldLabel}>Group Name</label>
           <input
             style={fieldStyle}
@@ -435,17 +555,7 @@ function NewGroupRow({ onCreated, onCancel }) {
             }}
           />
         </div>
-        <div>
-          <label style={subFieldLabel}>Investors Capital</label>
-          <input
-            style={fieldStyle}
-            type="number"
-            placeholder="5000000"
-            value={investorsCapital}
-            onChange={e => setInvestorsCapital(e.target.value)}
-          />
-        </div>
-        <div style={{ gridColumn: 'span 2' }}>
+        <div style={{ flex: '2 1 300px' }}>
           <label style={subFieldLabel}>Description</label>
           <input
             style={fieldStyle}
@@ -454,19 +564,27 @@ function NewGroupRow({ onCreated, onCancel }) {
             onChange={e => setDescription(e.target.value)}
           />
         </div>
-
-        {/* Return Capital Checkbox */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-          <label style={subFieldLabel}>Return Capital</label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', height: '36px', cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={isReturnCapital}
-              onChange={e => handleReturnCapitalToggle(e.target.checked)}
-            />
-            <span style={{ color: isReturnCapital ? '#f59e0b' : 'var(--text-muted)', fontWeight: 600 }}>12-Mo Notice</span>
-          </label>
+        <div style={{ width: '80px' }}>
+          <label style={subFieldLabel}>Order</label>
+          <input style={fieldStyle} type="number" value={order} onChange={e => setOrder(e.target.value)} />
         </div>
+      </div>
+
+      {/* Row 2: Investment, Date & ROI Governance */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', alignItems: 'flex-start' }}>
+        <div style={{ width: '170px' }}>
+          <label style={subFieldLabel}>Investors Capital (₦)</label>
+          <input
+            style={fieldStyle}
+            type="number"
+            placeholder="e.g. 5000000"
+            value={investorsCapital}
+            onChange={e => setInvestorsCapital(e.target.value)}
+          />
+        </div>
+
+        {/* Unambiguous Day / Month / Year Picker */}
+        <DateInputGroup value={investmentStartDate} onChange={setInvestmentStartDate} />
 
         {/* %ROI Input */}
         <div style={{ width: '85px' }}>
@@ -493,42 +611,53 @@ function NewGroupRow({ onCreated, onCancel }) {
           </label>
         </div>
 
-        {/* Investor Checkbox */}
+        {/* Return Capital Checkbox */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-          <label style={subFieldLabel}>Investor</label>
+          <label style={subFieldLabel}>Return Capital</label>
           <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', height: '36px', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={isReturnCapital}
+              onChange={e => handleReturnCapitalToggle(e.target.checked)}
+            />
+            <span style={{ color: isReturnCapital ? '#f59e0b' : 'var(--text-muted)', fontWeight: 600 }}>12-Mo Notice</span>
+          </label>
+        </div>
+      </div>
+
+      {/* Row 3: Account Toggle & Actions */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', paddingTop: '4px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem', cursor: 'pointer' }}>
             <input
               type="checkbox"
               checked={investorEnabled}
               onChange={e => handleInvestorToggle(e.target.checked)}
             />
-            <span style={{ color: investorEnabled ? '#38bdf8' : 'var(--text-muted)', fontWeight: 600 }}>Create Login</span>
+            <span style={{ color: investorEnabled ? '#38bdf8' : 'var(--text-muted)', fontWeight: 600 }}>
+              Create Investor Account Login
+            </span>
           </label>
         </div>
 
-        <div style={{ width: '65px' }}>
-          <label style={subFieldLabel}>Order</label>
-          <input style={fieldStyle} type="number" value={order} onChange={e => setOrder(e.target.value)} />
-        </div>
-
-        <div style={{ display: 'flex', gap: '6px', height: '36px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           <button
             onClick={create}
             disabled={busy}
             className="action-btn"
-            style={{ padding: '8px 14px', background: 'var(--primary-accent)', color: 'var(--bg-dark)', borderColor: 'var(--primary-accent)', fontWeight: 700 }}
+            style={{ padding: '8px 18px', background: 'var(--primary-accent)', color: 'var(--bg-dark)', borderColor: 'var(--primary-accent)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}
           >
-            <Plus size={14} /> Create
+            <Plus size={15} /> Create
           </button>
-          <button onClick={onCancel} className="action-btn" style={{ padding: '8px 12px' }}>
-            <X size={14} />
+          <button onClick={onCancel} className="action-btn" style={{ padding: '8px 14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <X size={15} /> Cancel
           </button>
         </div>
       </div>
 
       {/* Expanded Investor Credentials */}
       {investorEnabled && (
-        <div style={{ marginTop: '12px', padding: '12px', borderRadius: '6px', background: 'rgba(56, 189, 248, 0.05)', border: '1px solid rgba(56, 189, 248, 0.2)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', alignItems: 'flex-end' }}>
+        <div style={{ marginTop: '4px', padding: '12px', borderRadius: '6px', background: 'rgba(56, 189, 248, 0.05)', border: '1px solid rgba(56, 189, 248, 0.2)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', alignItems: 'flex-end' }}>
           <div>
             <label style={subFieldLabel}>Investor Username</label>
             <input style={fieldStyle} placeholder="e.g. investor_commercial" value={investorUsername} onChange={e => setInvestorUsername(e.target.value)} />
@@ -559,7 +688,7 @@ function NewGroupRow({ onCreated, onCancel }) {
         </div>
       )}
 
-      {error && <p style={{ color: 'var(--danger)', fontSize: '0.78rem', marginTop: '6px' }}>{error}</p>}
+      {error && <p style={{ color: 'var(--danger)', fontSize: '0.78rem', marginTop: '4px' }}>{error}</p>}
     </div>
   );
 }

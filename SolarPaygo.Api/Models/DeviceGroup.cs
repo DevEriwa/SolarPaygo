@@ -17,6 +17,9 @@ namespace SolarPaygo.Api.Models
         public decimal RemittanceSharePercent { get; set; } = 100m;
         public string SettlementCycle { get; set; } = "Monthly"; // "Daily", "Weekly", "Monthly"
 
+        // Investment cycle anchor - the date counting begins; annual cycles recur on this anniversary each year
+        public DateTime? InvestmentStartDate { get; set; }
+
         // Capital Exit & 12-Month Liquidation Notice Window
         public bool IsReturnCapital { get; set; } = false;
         public DateTime? ExitNoticeDate { get; set; }

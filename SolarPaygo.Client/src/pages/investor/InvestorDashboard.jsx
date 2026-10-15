@@ -26,6 +26,15 @@ function formatNaira(val) {
   return '₦' + Number(val).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
+function formatDate(dateStr) {
+  if (!dateStr) return '—';
+  try {
+    return new Date(dateStr).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  } catch {
+    return String(dateStr);
+  }
+}
+
 export default function InvestorDashboard({ handleLogout }) {
   // 'daily', 'weekly', 'monthly', 'yearly'
   const [cycleTab, setCycleTab] = useState('monthly');
@@ -109,7 +118,7 @@ export default function InvestorDashboard({ handleLogout }) {
     periodTitle = "This Month's Remittance";
   } else if (cycleTab === 'yearly') {
     periodRemitted = fin.remittedYear || 0;
-    periodTitle = "Current Year Remittance (Capped)";
+    periodTitle = "Current Cycle Remittance (Capped)";
   }
 
   // Filter to only include cash flows that directly credited this investor
@@ -120,7 +129,7 @@ export default function InvestorDashboard({ handleLogout }) {
       {/* ─── Top Header Bar ────────────────────────────────────────────── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px', marginBottom: '24px' }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <span style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', padding: '4px 10px', borderRadius: '6px', fontSize: '0.78rem', fontWeight: 700, letterSpacing: '0.5px', textTransform: 'uppercase' }}>
               Investor Portal
             </span>
@@ -133,10 +142,24 @@ export default function InvestorDashboard({ handleLogout }) {
                 <CheckCircle2 size={12} /> Active Smart Remittance
               </span>
             )}
+
+            {fin.reoccurringDate && (
+              <span style={{ background: 'rgba(56, 189, 248, 0.12)', color: '#38bdf8', padding: '4px 10px', borderRadius: '6px', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
+                <Calendar size={12} /> Reoccurring Date: {formatDate(fin.reoccurringDate)}
+              </span>
+            )}
+
+            {group.isReturnCapital && fin.finalSettlementDate && (
+              <span style={{ background: 'rgba(16, 185, 129, 0.12)', color: '#10b981', padding: '4px 10px', borderRadius: '6px', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
+                <CheckCircle size={12} /> Final Settlement: {formatDate(fin.finalSettlementDate)}
+              </span>
+            )}
+
             <span style={{ background: 'rgba(255, 255, 255, 0.05)', color: 'var(--text-muted)', padding: '4px 10px', borderRadius: '6px', fontSize: '0.78rem' }}>
               Settlement Cadence: {group.settlementCycle || 'Monthly'}
             </span>
           </div>
+
           <h1 style={{ fontSize: '1.85rem', fontWeight: 800, color: '#fff', marginTop: '8px', display: 'flex', alignItems: 'center', gap: '10px' }}>
             <Layers size={26} color="var(--primary-accent)" /> {group.name}
           </h1>
@@ -184,7 +207,15 @@ export default function InvestorDashboard({ handleLogout }) {
                 Annual Target Yield Milestone Satisfied ({formatNaira(fin.annualRoiMilestone)})
               </h3>
               <p style={{ color: '#e5e7eb', fontSize: '0.86rem', lineHeight: 1.4 }}>
-                Your agreed annual return of <strong>{formatNaira(fin.annualRoiMilestone)}</strong> has been completely fulfilled for this cycle.
+                {fin.isCapitalReturnCycle ? (
+                  <>
+                    Your agreed annual return of <strong>10% ROI ({formatNaira(fin.baseYield)})</strong> plus <strong>Capital ({formatNaira(fin.capitalToReturn)})</strong> totaling <strong>{formatNaira(fin.annualRoiMilestone)}</strong> has been completely fulfilled for this cycle.
+                  </>
+                ) : (
+                  <>
+                    Your agreed annual return of <strong>{formatNaira(fin.annualRoiMilestone)}</strong> has been completely fulfilled for this cycle.
+                  </>
+                )}
               </p>
             </div>
           </div>
@@ -196,7 +227,7 @@ export default function InvestorDashboard({ handleLogout }) {
       )}
 
       {/* ─── Metric Cards Grid ────────────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '18px', marginBottom: '28px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '18px', marginBottom: '28px' }}>
         {/* Card 1: Principal Capital */}
         <div className="glass-panel" style={{ padding: '20px', position: 'relative', overflow: 'hidden' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
@@ -226,11 +257,61 @@ export default function InvestorDashboard({ handleLogout }) {
             </div>
           </div>
           <div style={{ fontSize: '1.85rem', fontWeight: 800, color: '#10b981' }}>
-            {formatNaira(fin.annualRoiMilestone)}
+            {formatNaira(fin.isCapitalReturnCycle ? fin.annualRoiMilestone : (fin.baseYield || fin.annualRoiMilestone))}
           </div>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '6px' }}>
-            {group.isReturnCapital ? 'Adjusted exit rate' : 'Auto-renews indefinitely every year'}
-          </div>
+
+          {/* Capital Return Indicators */}
+          {fin.isCapitalReturnCycle ? (
+            <div style={{ marginTop: '4px' }}>
+              <div style={{ fontSize: '0.9rem', color: '#ef4444', fontWeight: 700 }}>
+                + {formatNaira(fin.capitalToReturn || fin.investorsCapital)} <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '0.78rem' }}>Adjusted exit rate</span>
+              </div>
+              <div style={{ fontSize: '0.76rem', color: '#34d399', marginTop: '2px' }}>
+                10% ROI ({formatNaira(fin.baseYield)}) + Capital ({formatNaira(fin.capitalToReturn)})
+              </div>
+            </div>
+          ) : fin.isCapitalReturnQueued ? (
+            <div style={{ marginTop: '4px' }}>
+              <div style={{ fontSize: '0.82rem', color: '#f59e0b', fontWeight: 600 }}>
+                15% running till cycle end ({formatDate(fin.reoccurringDate)})
+              </div>
+              <div style={{ fontSize: '0.74rem', color: '#38bdf8', marginTop: '2px' }}>
+                New cycle target: 10% ({formatNaira(Math.round(fin.investorsCapital * 0.10))}) + Capital ({formatNaira(fin.investorsCapital)})
+              </div>
+            </div>
+          ) : (
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '6px' }}>
+              Auto-renews indefinitely every year
+            </div>
+          )}
+
+          {/* Detailed Cycle, Reoccurring, and Settlement Dates */}
+          {group.isReturnCapital && (
+            <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.08)', fontSize: '0.76rem', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div style={{ color: '#38bdf8', display: 'flex', justifyContent: 'space-between' }}>
+                <span>Reoccurring Date:</span>
+                <strong style={{ color: '#fff' }}>{formatDate(fin.reoccurringDate)}</strong>
+              </div>
+              {fin.newCycleStartDate && (
+                <div style={{ color: '#fbbf24', display: 'flex', justifyContent: 'space-between' }}>
+                  <span>New Cycle Start Date:</span>
+                  <strong style={{ color: '#fff' }}>{formatDate(fin.newCycleStartDate)}</strong>
+                </div>
+              )}
+              {fin.finalSettlementDate && (
+                <div style={{ color: '#10b981', display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Final Settlement Date:</span>
+                  <strong style={{ color: '#fff' }}>{formatDate(fin.finalSettlementDate)}</strong>
+                </div>
+              )}
+            </div>
+          )}
+
+          {!group.isReturnCapital && group.investmentStartDate && (
+            <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.08)', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+              Reoccurring Date: <strong style={{ color: '#38bdf8' }}>{formatDate(fin.reoccurringDate)}</strong>
+            </div>
+          )}
         </div>
 
         {/* Card 3: Year Cash Flow Remitted (Strictly Capped at Annual ROI) */}
@@ -391,7 +472,9 @@ export default function InvestorDashboard({ handleLogout }) {
               {formatNaira(fin.annualRoiMilestone)}
             </div>
             <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-              Agreed annual yield return
+              {fin.isCapitalReturnCycle
+                ? `10% Yield (${formatNaira(fin.baseYield)}) + Capital (${formatNaira(fin.capitalToReturn)})`
+                : (fin.isCapitalReturnQueued ? '15% ROI (10% + Capital on new cycle)' : 'Agreed annual yield return')}
             </div>
           </div>
 
@@ -547,7 +630,7 @@ export default function InvestorDashboard({ handleLogout }) {
                         fontSize: '0.74rem',
                         fontWeight: 600
                       }}>
-                        Credited to Portfolio
+                        {t.status || 'Credited to Portfolio'}
                       </span>
                     </td>
                   </tr>

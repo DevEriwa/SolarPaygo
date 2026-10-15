@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SolarPaygo.Api.Data;
@@ -23,7 +23,50 @@ namespace SolarPaygo.Api.Controllers
             _context = context;
         }
 
-        // GET /api/investor/portfolio â€” Fetch complete portfolio metrics for investor
+        // Helper to determine cycle start date for any timestamp given an anchor date
+        private static DateTime GetCycleStart(DateTime txDate, DateTime? anchorDate)
+        {
+            if (!anchorDate.HasValue)
+                return new DateTime(txDate.Year, 1, 1);
+
+            var anchor = anchorDate.Value.Date;
+            int diff = txDate.Year - anchor.Year;
+            var start = anchor.AddYears(diff);
+            if (start > txDate.Date) start = anchor.AddYears(diff - 1);
+            return start;
+        }
+
+        // Helper to determine target annual milestone for a given cycle
+        private static (decimal milestone, decimal roiRate, bool isCapReturn) GetCycleTarget(DateTime cycleStart, DeviceGroup group, DateTime now)
+        {
+            if (!group.IsRoiEnabled || group.InvestorsCapital <= 0)
+                return (0m, group.RoiPercentage, false);
+
+            if (group.IsReturnCapital)
+            {
+                var noticeDate = group.ExitNoticeDate?.Date ?? now.Date;
+                if (cycleStart >= noticeDate)
+                {
+                    // In new / recurring return-capital cycle: 10% ROI + capital
+                    decimal roi = 10m;
+                    decimal yieldAmount = Math.Round(group.InvestorsCapital * (roi / 100m), 2);
+                    return (yieldAmount + group.InvestorsCapital, roi, true);
+                }
+                else
+                {
+                    // Running cycle before the new recycle date: old yield (15%) continues till cycle end
+                    decimal roi = 15m;
+                    decimal yieldAmount = Math.Round(group.InvestorsCapital * (roi / 100m), 2);
+                    return (yieldAmount, roi, false);
+                }
+            }
+
+            decimal standardRoi = group.RoiPercentage > 0 ? group.RoiPercentage : 15m;
+            decimal standardYield = Math.Round(group.InvestorsCapital * (standardRoi / 100m), 2);
+            return (standardYield, standardRoi, false);
+        }
+
+        // GET /api/investor/portfolio — Fetch complete portfolio metrics for investor
         [Authorize(Roles = "Investor,Admin,SuperAdmin")]
         [HttpGet("portfolio")]
         public async Task<IActionResult> GetPortfolio([FromQuery] int? groupId)
@@ -40,7 +83,6 @@ namespace SolarPaygo.Api.Controllers
                 }
                 else
                 {
-                    // Fallback to lookup AdminAccount by username
                     var username = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.Identity?.Name;
                     if (!string.IsNullOrEmpty(username))
                     {
@@ -54,7 +96,6 @@ namespace SolarPaygo.Api.Controllers
             }
             else
             {
-                // Admin or SuperAdmin viewing an investor group
                 targetGroupId = groupId ?? 0;
             }
 
@@ -86,16 +127,24 @@ namespace SolarPaygo.Api.Controllers
             var todayUtc = now.Date;
             var startOfWeek = todayUtc.AddDays(-(int)todayUtc.DayOfWeek);
             var startOfMonth = new DateTime(now.Year, now.Month, 1);
-            var startOfYear = new DateTime(now.Year, 1, 1);
+
+            // Determine current cycle window based on InvestmentStartDate
+            DateTime cycleStart = GetCycleStart(now, group.InvestmentStartDate);
+            DateTime cycleEnd = cycleStart.AddYears(1);
+            DateTime reoccurringDate = cycleEnd;
+
+            // Compute current cycle target milestone and capital return flags
+            var (annualRoiMilestone, roiRate, isCapitalReturnCycle) = GetCycleTarget(cycleStart, group, now);
+
+            bool isCapitalReturnQueued = group.IsReturnCapital && !isCapitalReturnCycle;
+            DateTime? newCycleStartDate = group.IsReturnCapital ? (isCapitalReturnCycle ? cycleStart : cycleEnd) : null;
+            DateTime? finalSettlementDate = group.IsReturnCapital ? (isCapitalReturnCycle ? cycleEnd : cycleEnd.AddYears(1)) : null;
+
+            decimal baseYield = Math.Round(group.InvestorsCapital * (roiRate / 100m), 2);
+            decimal capitalToReturn = isCapitalReturnCycle ? group.InvestorsCapital : 0m;
 
             // Remittance share ratio
             decimal shareRatio = (group.RemittanceSharePercent > 0 ? group.RemittanceSharePercent : 100m) / 100m;
-
-            // Annual ROI target milestone (e.g. dynamic % of InvestorsCapital)
-            decimal roiRate = group.RoiPercentage;
-            decimal annualRoiMilestone = (group.IsRoiEnabled && group.InvestorsCapital > 0 && roiRate > 0)
-                ? Math.Round(group.InvestorsCapital * (roiRate / 100m), 2)
-                : 0m;
 
             // Sort transactions chronologically (oldest to newest) to accurately track milestone fulfillment
             var chronologicalTx = transactions.OrderBy(t => t.TransactionDate).ToList();
@@ -115,53 +164,60 @@ namespace SolarPaygo.Api.Controllers
             decimal remittedWeek = 0m;
             decimal remittedToday = 0m;
 
+            // Cycle-by-cycle tracking to ensure historical transactions strictly correlate with each year's target milestone
+            var cycleShares = new Dictionary<DateTime, decimal>();
+
             var processedTransactions = new List<object>();
 
             foreach (var t in chronologicalTx)
             {
                 grossTotal += t.AmountPaid;
 
-                bool isCurrentYear = t.TransactionDate >= startOfYear;
-                bool isCurrentMonth = t.TransactionDate >= startOfMonth;
-                bool isCurrentWeek = t.TransactionDate >= startOfWeek;
-                bool isToday = t.TransactionDate >= todayUtc;
+                bool isCurrentCycle = t.TransactionDate >= cycleStart && t.TransactionDate < cycleEnd;
+                bool isCurrentMonth = isCurrentCycle && t.TransactionDate >= startOfMonth;
+                bool isCurrentWeek = isCurrentCycle && t.TransactionDate >= startOfWeek;
+                bool isToday = isCurrentCycle && t.TransactionDate >= todayUtc;
 
-                if (isCurrentYear) grossYear += t.AmountPaid;
+                if (isCurrentCycle) grossYear += t.AmountPaid;
                 if (isCurrentMonth) grossMonth += t.AmountPaid;
                 if (isCurrentWeek) grossWeek += t.AmountPaid;
                 if (isToday) grossToday += t.AmountPaid;
 
                 decimal uncappedTxShare = Math.Round(t.AmountPaid * shareRatio, 2);
-                if (isCurrentYear) uncappedShareYear += uncappedTxShare;
+                if (isCurrentCycle) uncappedShareYear += uncappedTxShare;
                 uncappedShareTotal += uncappedTxShare;
 
-                decimal eligibleTxShare = uncappedTxShare;
-                string statusText = t.Status ?? "Completed";
+                // Determine transaction's specific cycle start & milestone cap
+                var txCycleStart = GetCycleStart(t.TransactionDate, group.InvestmentStartDate);
+                if (!cycleShares.ContainsKey(txCycleStart))
+                    cycleShares[txCycleStart] = 0m;
 
-                if (annualRoiMilestone > 0 && isCurrentYear)
+                var (txCycleCap, _, _) = GetCycleTarget(txCycleStart, group, now);
+
+                decimal remainingCap = txCycleCap > 0
+                    ? Math.Max(0m, txCycleCap - cycleShares[txCycleStart])
+                    : uncappedTxShare;
+
+                decimal eligibleTxShare = txCycleCap > 0
+                    ? Math.Min(uncappedTxShare, remainingCap)
+                    : uncappedTxShare;
+
+                cycleShares[txCycleStart] += eligibleTxShare;
+
+                string statusText = "Credited";
+                if (txCycleCap > 0)
                 {
-                    decimal remainingCap = Math.Max(0m, annualRoiMilestone - runningYearInvestorShare);
-                    eligibleTxShare = Math.Min(uncappedTxShare, remainingCap);
-
                     if (eligibleTxShare <= 0m && uncappedTxShare > 0m)
-                    {
                         statusText = "Cap Reached";
-                    }
                     else if (eligibleTxShare < uncappedTxShare)
-                    {
                         statusText = "Cap Partially Reached";
-                    }
+                }
 
+                if (isCurrentCycle)
+                {
                     runningYearInvestorShare += eligibleTxShare;
                     remittedYear += eligibleTxShare;
 
-                    if (isCurrentMonth) remittedMonth += eligibleTxShare;
-                    if (isCurrentWeek) remittedWeek += eligibleTxShare;
-                    if (isToday) remittedToday += eligibleTxShare;
-                }
-                else
-                {
-                    remittedYear += eligibleTxShare;
                     if (isCurrentMonth) remittedMonth += eligibleTxShare;
                     if (isCurrentWeek) remittedWeek += eligibleTxShare;
                     if (isToday) remittedToday += eligibleTxShare;
@@ -179,7 +235,7 @@ namespace SolarPaygo.Api.Controllers
                         RemittanceCredited = eligibleTxShare,
                         InvestorShareAmount = eligibleTxShare,
                         t.TransactionDate,
-                        Status = "Credited"
+                        Status = statusText
                     });
                 }
             }
@@ -194,11 +250,11 @@ namespace SolarPaygo.Api.Controllers
             decimal remainingToMilestone = Math.Max(0m, annualRoiMilestone - remittedYear);
 
             // Exit liquidation stats
-            int? daysRemainingExit = group.ExitTargetDate.HasValue
-                ? Math.Max(0, (int)(group.ExitTargetDate.Value - now).TotalDays)
+            int? daysRemainingExit = finalSettlementDate.HasValue
+                ? Math.Max(0, (int)(finalSettlementDate.Value - now).TotalDays)
                 : (int?)null;
 
-            decimal exitTargetPayout = group.ExitCapitalAmount ?? (group.InvestorsCapital + (group.InvestorsCapital * (roiRate / 100m)));
+            decimal exitTargetPayout = group.ExitCapitalAmount ?? (group.InvestorsCapital + Math.Round(group.InvestorsCapital * 0.10m, 2));
 
             // Settlements history
             var settlements = await _context.InvestorSettlements
@@ -208,8 +264,8 @@ namespace SolarPaygo.Api.Controllers
 
             decimal totalSettled = settlements.Where(s => s.Status == "Settled").Sum(s => s.Amount);
 
-            // Remitted all-time is capped at eligible yield to date, preventing overpayment
-            decimal remittedAllTime = remittedYear;
+            // All-time remitted is sum of all eligible cycle yields
+            decimal remittedAllTime = cycleShares.Values.Sum();
             decimal pendingSettlement = Math.Max(0m, remittedAllTime - totalSettled);
 
             return Ok(new
@@ -221,26 +277,46 @@ namespace SolarPaygo.Api.Controllers
                     group.Description,
                     group.InvestorsCapital,
                     group.IsRoiEnabled,
-                    group.RoiPercentage,
+                    RoiPercentage = roiRate,
                     group.RemittanceSharePercent,
                     group.SettlementCycle,
+                    group.InvestmentStartDate,
                     group.IsReturnCapital,
                     group.ExitNoticeDate,
-                    group.ExitTargetDate,
+                    ExitTargetDate = finalSettlementDate,
                     ExitCapitalAmount = exitTargetPayout,
                     DaysRemainingInExitWindow = daysRemainingExit,
-                    group.IsAccountClosed
+                    group.IsAccountClosed,
+                    CycleStartDate = cycleStart,
+                    CycleEndDate = cycleEnd,
+                    ReoccurringDate = reoccurringDate,
+                    NewCycleStartDate = newCycleStartDate,
+                    FinalSettlementDate = finalSettlementDate,
+                    IsCapitalReturnCycle = isCapitalReturnCycle,
+                    IsCapitalReturnQueued = isCapitalReturnQueued
                 },
                 Financials = new
                 {
                     InvestorsCapital = group.InvestorsCapital,
                     RoiPercentage = roiRate,
                     AnnualRoiMilestone = annualRoiMilestone,
+                    BaseYield = baseYield,
+                    CapitalToReturn = isCapitalReturnCycle ? capitalToReturn : (isCapitalReturnQueued ? group.InvestorsCapital : 0m),
                     ProgressPercent = progressPercent,
                     RemainingToMilestone = remainingToMilestone,
                     IsCapReached = isCapReached,
 
-                    // Capped Annual Investor Yield
+                    // Cycle & Recurrence dates
+                    InvestmentStartDate = group.InvestmentStartDate,
+                    CycleStartDate = cycleStart,
+                    CycleEndDate = cycleEnd,
+                    ReoccurringDate = reoccurringDate,
+                    NewCycleStartDate = newCycleStartDate,
+                    FinalSettlementDate = finalSettlementDate,
+                    IsCapitalReturnCycle = isCapitalReturnCycle,
+                    IsCapitalReturnQueued = isCapitalReturnQueued,
+
+                    // Capped Annual Investor Yield for current cycle
                     RemittedYear = remittedYear,
                     UncappedShareYear = uncappedShareYear,
                     CompanySurplusYear = companySurplusYear,
@@ -282,11 +358,11 @@ namespace SolarPaygo.Api.Controllers
                     s.LastSyncTime
                 }),
                 Settlements = settlements,
-                RecentTransactions = processedTransactions.OrderByDescending(p => ((dynamic)p).TransactionDate).Take(25)
+                RecentTransactions = processedTransactions.OrderByDescending(p => ((dynamic)p).TransactionDate).Take(30)
             });
         }
 
-        // GET /api/investor/admin-summary â€” Complete portfolio and payout status for Admin
+        // GET /api/investor/admin-summary — Complete portfolio and payout status for Admin
         [Authorize(Roles = "Admin,SuperAdmin")]
         [HttpGet("admin-summary")]
         public async Task<IActionResult> GetAdminSummary()
@@ -315,10 +391,9 @@ namespace SolarPaygo.Api.Controllers
                 .ToListAsync();
 
             var now = DateTime.UtcNow;
-            var startOfYear = new DateTime(now.Year, 1, 1);
-            var startOfMonth = new DateTime(now.Year, now.Month, 1);
-            var startOfWeek = now.Date.AddDays(-(int)now.Date.DayOfWeek);
             var todayUtc = now.Date;
+            var startOfWeek = todayUtc.AddDays(-(int)todayUtc.DayOfWeek);
+            var startOfMonth = new DateTime(now.Year, now.Month, 1);
 
             var summaryList = new List<object>();
 
@@ -329,11 +404,16 @@ namespace SolarPaygo.Api.Controllers
                 var gTx = allTransactions.Where(t => gSystemIds.Contains(t.SolarSystemId)).OrderBy(t => t.TransactionDate).ToList();
                 var gSettlements = allSettlements.Where(s => s.DeviceGroupId == g.Id).ToList();
 
+                DateTime cycleStart = GetCycleStart(now, g.InvestmentStartDate);
+                DateTime cycleEnd = cycleStart.AddYears(1);
+                DateTime reoccurringDate = cycleEnd;
+
+                var (annualRoiMilestone, roiRate, isCapitalReturnCycle) = GetCycleTarget(cycleStart, g, now);
+                bool isCapitalReturnQueued = g.IsReturnCapital && !isCapitalReturnCycle;
+                DateTime? newCycleStartDate = g.IsReturnCapital ? (isCapitalReturnCycle ? cycleStart : cycleEnd) : null;
+                DateTime? finalSettlementDate = g.IsReturnCapital ? (isCapitalReturnCycle ? cycleEnd : cycleEnd.AddYears(1)) : null;
+
                 decimal shareRatio = (g.RemittanceSharePercent > 0 ? g.RemittanceSharePercent : 100m) / 100m;
-                decimal roiRate = g.RoiPercentage;
-                decimal annualRoiMilestone = (g.IsRoiEnabled && g.InvestorsCapital > 0 && roiRate > 0)
-                    ? Math.Round(g.InvestorsCapital * (roiRate / 100m), 2)
-                    : 0m;
 
                 decimal grossTotal = 0m;
                 decimal grossYear = 0m;
@@ -342,44 +422,47 @@ namespace SolarPaygo.Api.Controllers
                 decimal grossToday = 0m;
 
                 decimal uncappedYear = 0m;
-                decimal runningYearInvestorShare = 0m;
                 decimal remittedYear = 0m;
                 decimal remittedMonth = 0m;
                 decimal remittedWeek = 0m;
                 decimal remittedToday = 0m;
 
+                var cycleShares = new Dictionary<DateTime, decimal>();
+
                 foreach (var t in gTx)
                 {
                     grossTotal += t.AmountPaid;
 
-                    bool isCurrentYear = t.TransactionDate >= startOfYear;
-                    bool isCurrentMonth = t.TransactionDate >= startOfMonth;
-                    bool isCurrentWeek = t.TransactionDate >= startOfWeek;
-                    bool isToday = t.TransactionDate >= todayUtc;
+                    bool isCurrentCycle = t.TransactionDate >= cycleStart && t.TransactionDate < cycleEnd;
+                    bool isCurrentMonth = isCurrentCycle && t.TransactionDate >= startOfMonth;
+                    bool isCurrentWeek = isCurrentCycle && t.TransactionDate >= startOfWeek;
+                    bool isToday = isCurrentCycle && t.TransactionDate >= todayUtc;
 
-                    if (isCurrentYear) grossYear += t.AmountPaid;
+                    if (isCurrentCycle) grossYear += t.AmountPaid;
                     if (isCurrentMonth) grossMonth += t.AmountPaid;
                     if (isCurrentWeek) grossWeek += t.AmountPaid;
                     if (isToday) grossToday += t.AmountPaid;
 
                     decimal uncappedTxShare = Math.Round(t.AmountPaid * shareRatio, 2);
-                    if (isCurrentYear) uncappedYear += uncappedTxShare;
+                    if (isCurrentCycle) uncappedYear += uncappedTxShare;
 
-                    decimal eligibleTxShare = uncappedTxShare;
+                    var txCycleStart = GetCycleStart(t.TransactionDate, g.InvestmentStartDate);
+                    if (!cycleShares.ContainsKey(txCycleStart))
+                        cycleShares[txCycleStart] = 0m;
 
-                    if (annualRoiMilestone > 0 && isCurrentYear)
-                    {
-                        decimal remainingCap = Math.Max(0m, annualRoiMilestone - runningYearInvestorShare);
-                        eligibleTxShare = Math.Min(uncappedTxShare, remainingCap);
+                    var (txCycleCap, _, _) = GetCycleTarget(txCycleStart, g, now);
 
-                        runningYearInvestorShare += eligibleTxShare;
-                        remittedYear += eligibleTxShare;
+                    decimal remainingCap = txCycleCap > 0
+                        ? Math.Max(0m, txCycleCap - cycleShares[txCycleStart])
+                        : uncappedTxShare;
 
-                        if (isCurrentMonth) remittedMonth += eligibleTxShare;
-                        if (isCurrentWeek) remittedWeek += eligibleTxShare;
-                        if (isToday) remittedToday += eligibleTxShare;
-                    }
-                    else
+                    decimal eligibleTxShare = txCycleCap > 0
+                        ? Math.Min(uncappedTxShare, remainingCap)
+                        : uncappedTxShare;
+
+                    cycleShares[txCycleStart] += eligibleTxShare;
+
+                    if (isCurrentCycle)
                     {
                         remittedYear += eligibleTxShare;
                         if (isCurrentMonth) remittedMonth += eligibleTxShare;
@@ -392,7 +475,7 @@ namespace SolarPaygo.Api.Controllers
                 decimal companySurplusYear = Math.Max(0m, uncappedYear - remittedYear);
 
                 decimal totalSettled = gSettlements.Sum(s => s.Amount);
-                decimal remittedAllTime = remittedYear;
+                decimal remittedAllTime = cycleShares.Values.Sum();
                 decimal pendingSettlement = Math.Max(0m, remittedAllTime - totalSettled);
 
                 string? investorUsername = g.InvestorAdminAccountId.HasValue && accounts.ContainsKey(g.InvestorAdminAccountId.Value)
@@ -409,10 +492,20 @@ namespace SolarPaygo.Api.Controllers
                     AnnualRoiMilestone = annualRoiMilestone,
                     RemittanceSharePercent = g.RemittanceSharePercent,
                     g.SettlementCycle,
+                    g.InvestmentStartDate,
                     g.IsRoiEnabled,
                     g.IsReturnCapital,
                     InvestorUsername = investorUsername,
                     MeterCount = gSystems.Count,
+
+                    // Cycle & Liquidation dates
+                    CycleStartDate = cycleStart,
+                    CycleEndDate = cycleEnd,
+                    ReoccurringDate = reoccurringDate,
+                    NewCycleStartDate = newCycleStartDate,
+                    FinalSettlementDate = finalSettlementDate,
+                    IsCapitalReturnCycle = isCapitalReturnCycle,
+                    IsCapitalReturnQueued = isCapitalReturnQueued,
 
                     // Financials
                     GrossYear = grossYear,
@@ -438,7 +531,7 @@ namespace SolarPaygo.Api.Controllers
             return Ok(summaryList);
         }
 
-        // POST /api/investor/settle â€” Admin records manual payout/settlement
+        // POST /api/investor/settle — Admin records manual payout/settlement
         [Authorize(Roles = "Admin,SuperAdmin")]
         [HttpPost("settle")]
         public async Task<IActionResult> RecordSettlement([FromBody] RecordSettlementRequest request)
@@ -477,4 +570,3 @@ namespace SolarPaygo.Api.Controllers
         }
     }
 }
-
