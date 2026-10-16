@@ -17,7 +17,8 @@ import {
   Users,
   Percent,
   CheckCircle,
-  Award
+  Award,
+  Search
 } from 'lucide-react';
 import { BASE_URL } from '../../config';
 
@@ -38,6 +39,10 @@ function formatDate(dateStr) {
 export default function InvestorDashboard({ handleLogout }) {
   // 'daily', 'weekly', 'monthly', 'yearly'
   const [cycleTab, setCycleTab] = useState('monthly');
+  const [historyTab, setHistoryTab] = useState('current'); // 'current', 'all', 'past'
+  const [rowsPerPage, setRowsPerPage] = useState(10); // 10, 25, 50, 100, 'all'
+  const [currentPage, setCurrentPage] = useState(1);
+  const [historySearch, setHistorySearch] = useState('');
 
   const fetchPortfolio = async () => {
     const token = localStorage.getItem('token');
@@ -123,6 +128,47 @@ export default function InvestorDashboard({ handleLogout }) {
 
   // Filter to only include cash flows that directly credited this investor
   const eligibleTransactions = recentTx.filter(t => (Number(t.remittanceCredited || t.investorShareAmount) || 0) > 0);
+
+  // Helper to determine if transaction belongs to current cycle
+  const isCurrentCycleTx = (t) => {
+    if (typeof t.isCurrentCycle === 'boolean') return t.isCurrentCycle;
+    if (typeof t.IsCurrentCycle === 'boolean') return t.IsCurrentCycle;
+    if (fin.cycleStartDate && fin.cycleEndDate) {
+      const d = new Date(t.transactionDate);
+      return d >= new Date(fin.cycleStartDate) && d < new Date(fin.cycleEndDate);
+    }
+    return true;
+  };
+
+  const currentYearTransactions = eligibleTransactions.filter(t => isCurrentCycleTx(t));
+  const pastYearTransactions = eligibleTransactions.filter(t => !isCurrentCycleTx(t));
+
+  const activeTransactions = historyTab === 'current'
+    ? currentYearTransactions
+    : historyTab === 'past'
+    ? pastYearTransactions
+    : eligibleTransactions;
+
+  const filteredTransactions = activeTransactions.filter(t => {
+    if (!historySearch.trim()) return true;
+    const q = historySearch.toLowerCase();
+    const meterStr = (t.hardwareId || '').toLowerCase();
+    const dateStr = new Date(t.transactionDate).toLocaleString().toLowerCase();
+    const statusStr = (t.status || '').toLowerCase();
+    const amountStr = String(t.remittanceCredited || t.investorShareAmount || '');
+    return meterStr.includes(q) || dateStr.includes(q) || statusStr.includes(q) || amountStr.includes(q);
+  });
+
+  const currentViewSum = activeTransactions.reduce((acc, t) => acc + (Number(t.remittanceCredited || t.investorShareAmount) || 0), 0);
+
+  const totalItems = filteredTransactions.length;
+  const pageSize = rowsPerPage === 'all' ? (totalItems || 1) : Number(rowsPerPage);
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const startIndex = rowsPerPage === 'all' ? 0 : (safePage - 1) * pageSize;
+  const paginatedTransactions = rowsPerPage === 'all'
+    ? filteredTransactions
+    : filteredTransactions.slice(startIndex, startIndex + pageSize);
 
   return (
     <div style={{ padding: '24px 32px', maxWidth: '1440px', margin: '0 auto' }}>
@@ -587,56 +633,344 @@ export default function InvestorDashboard({ handleLogout }) {
         )}
       </div>
 
-      {/* ─── Recent Meter Remittance Cash Flows (Only Direct Yield) ── */}
+      {/* ─── Remittance Cash Flows History (Current Year & All-Time) ── */}
       <div className="glass-panel" style={{ padding: '24px', marginBottom: '28px' }}>
-        <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#fff', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <TrendingUp size={20} color="var(--primary-accent)" /> Recent Remittance Cash Flows
-        </h3>
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.84rem', marginBottom: '16px' }}>
-          Direct remittances credited to your investment portfolio from energy operations.
-        </p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px', marginBottom: '16px' }}>
+          <div>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#fff', margin: '0 0 6px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <TrendingUp size={22} color="var(--primary-accent)" /> Remittance Cash Flows History
+            </h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: 0 }}>
+              Direct remittances credited to your investment portfolio from energy operations.
+            </p>
+          </div>
 
-        {eligibleTransactions.length === 0 ? (
+          {/* Quick Stats Pill */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '8px 14px' }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+              {historyTab === 'current' ? 'Current Cycle Total:' : historyTab === 'past' ? 'Past Cycles Total:' : 'All-Time Credited:'}
+            </span>
+            <span style={{ fontSize: '1rem', fontWeight: 800, color: '#10b981' }}>
+              {formatNaira(currentViewSum)}
+            </span>
+          </div>
+        </div>
+
+        {/* Tab Switcher: Current Year History vs All Time History vs Past Cycles */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '16px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <button
+              onClick={() => { setHistoryTab('current'); setCurrentPage(1); }}
+              className={`filter-tab ${historyTab === 'current' ? 'active' : ''}`}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '0.88rem',
+                padding: '8px 16px',
+                background: historyTab === 'current' ? 'var(--primary-accent)' : 'rgba(255,255,255,0.04)',
+                color: historyTab === 'current' ? 'var(--bg-dark)' : 'var(--text-main)',
+                fontWeight: historyTab === 'current' ? 700 : 500,
+                border: '1px solid',
+                borderColor: historyTab === 'current' ? 'var(--primary-accent)' : 'var(--border-color)'
+              }}
+            >
+              <span>Current Year History</span>
+              <span style={{
+                background: historyTab === 'current' ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.1)',
+                padding: '2px 8px',
+                borderRadius: '10px',
+                fontSize: '0.74rem'
+              }}>
+                {currentYearTransactions.length}
+              </span>
+            </button>
+
+            <button
+              onClick={() => { setHistoryTab('all'); setCurrentPage(1); }}
+              className={`filter-tab ${historyTab === 'all' ? 'active' : ''}`}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '0.88rem',
+                padding: '8px 16px',
+                background: historyTab === 'all' ? 'var(--primary-accent)' : 'rgba(255,255,255,0.04)',
+                color: historyTab === 'all' ? 'var(--bg-dark)' : 'var(--text-main)',
+                fontWeight: historyTab === 'all' ? 700 : 500,
+                border: '1px solid',
+                borderColor: historyTab === 'all' ? 'var(--primary-accent)' : 'var(--border-color)'
+              }}
+            >
+              <span>All Time History</span>
+              <span style={{
+                background: historyTab === 'all' ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.1)',
+                padding: '2px 8px',
+                borderRadius: '10px',
+                fontSize: '0.74rem'
+              }}>
+                {eligibleTransactions.length}
+              </span>
+            </button>
+
+            {pastYearTransactions.length > 0 && (
+              <button
+                onClick={() => { setHistoryTab('past'); setCurrentPage(1); }}
+                className={`filter-tab ${historyTab === 'past' ? 'active' : ''}`}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  fontSize: '0.88rem',
+                  padding: '8px 16px',
+                  background: historyTab === 'past' ? 'var(--primary-accent)' : 'rgba(255,255,255,0.04)',
+                  color: historyTab === 'past' ? 'var(--bg-dark)' : 'var(--text-main)',
+                  fontWeight: historyTab === 'past' ? 700 : 500,
+                  border: '1px solid',
+                  borderColor: historyTab === 'past' ? 'var(--primary-accent)' : 'var(--border-color)'
+                }}
+              >
+                <span>Past Cycles</span>
+                <span style={{
+                  background: historyTab === 'past' ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.1)',
+                  padding: '2px 8px',
+                  borderRadius: '10px',
+                  fontSize: '0.74rem'
+                }}>
+                  {pastYearTransactions.length}
+                </span>
+              </button>
+            )}
+          </div>
+
+          {/* Search box & rows selector */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <div style={{ position: 'relative', width: '220px' }}>
+              <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <input
+                type="text"
+                placeholder="Search meter, date..."
+                value={historySearch}
+                onChange={(e) => { setHistorySearch(e.target.value); setCurrentPage(1); }}
+                style={{
+                  width: '100%',
+                  padding: '6px 26px 6px 30px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--border-color)',
+                  background: 'rgba(255,255,255,0.04)',
+                  color: 'white',
+                  fontSize: '0.82rem',
+                  outline: 'none'
+                }}
+              />
+              {historySearch && (
+                <button
+                  onClick={() => { setHistorySearch(''); setCurrentPage(1); }}
+                  style={{ position: 'absolute', right: '6px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1rem', lineHeight: 1 }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+
+            {/* Display Count / Rows selector */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+              <span>Show:</span>
+              {[10, 25, 50, 100, 'all'].map(r => (
+                <button
+                  key={r}
+                  onClick={() => { setRowsPerPage(r); setCurrentPage(1); }}
+                  style={{
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    border: '1px solid',
+                    borderColor: rowsPerPage === r ? 'var(--primary-accent)' : 'var(--border-color)',
+                    background: rowsPerPage === r ? 'rgba(245, 158, 11, 0.2)' : 'transparent',
+                    color: rowsPerPage === r ? 'var(--primary-accent)' : 'var(--text-muted)',
+                    fontSize: '0.78rem',
+                    fontWeight: rowsPerPage === r ? 700 : 500,
+                    cursor: 'pointer'
+                  }}
+                >
+                  {r === 'all' ? 'All' : r}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {filteredTransactions.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-            No remittance cash flows recorded for this portfolio yet.
+            {historySearch
+              ? `No transactions matched "${historySearch}".`
+              : historyTab === 'current'
+              ? 'No remittance cash flows recorded for the current year cycle yet.'
+              : 'No remittance cash flows recorded for this portfolio yet.'}
           </div>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', textAlign: 'left' }}>
-                  <th style={{ padding: '10px 14px' }}>Date</th>
-                  <th style={{ padding: '10px 14px' }}>Meter / Asset</th>
-                  <th style={{ padding: '10px 14px' }}>Remittance Credited</th>
-                  <th style={{ padding: '10px 14px' }}>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {eligibleTransactions.map(t => (
-                  <tr key={t.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                    <td style={{ padding: '10px 14px', color: 'var(--text-muted)' }}>
-                      {new Date(t.transactionDate).toLocaleDateString()} {new Date(t.transactionDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </td>
-                    <td style={{ padding: '10px 14px', fontWeight: 600, color: '#fff' }}>{t.hardwareId}</td>
-                    <td style={{ padding: '10px 14px', color: '#10b981', fontWeight: 700, fontSize: '0.95rem' }}>
-                      +{formatNaira(t.remittanceCredited || t.investorShareAmount)}
-                    </td>
-                    <td style={{ padding: '10px 14px' }}>
-                      <span style={{
-                        background: 'rgba(16, 185, 129, 0.15)',
-                        color: '#10b981',
-                        padding: '2px 8px',
-                        borderRadius: '4px',
-                        fontSize: '0.74rem',
-                        fontWeight: 600
-                      }}>
-                        {t.status || 'Credited to Portfolio'}
-                      </span>
-                    </td>
+          <div>
+            {/* Scrollable table container with side scroll and sticky header */}
+            <div
+              className="custom-table-scroll"
+              style={{
+                maxHeight: '460px',
+                overflowY: 'auto',
+                overflowX: 'auto',
+                border: '1px solid var(--border-color)',
+                borderRadius: '8px'
+              }}
+            >
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
+                <thead style={{ position: 'sticky', top: 0, background: '#1c1c1e', zIndex: 2, borderBottom: '1px solid var(--border-color)' }}>
+                  <tr style={{ color: 'var(--text-muted)', textAlign: 'left' }}>
+                    <th style={{ padding: '12px 14px' }}>Date & Time</th>
+                    <th style={{ padding: '12px 14px' }}>Meter / Asset</th>
+                    <th style={{ padding: '12px 14px' }}>Remittance Credited</th>
+                    <th style={{ padding: '12px 14px' }}>Cycle / Period</th>
+                    <th style={{ padding: '12px 14px' }}>Status</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {paginatedTransactions.map(t => {
+                    const isCurrent = isCurrentCycleTx(t);
+                    return (
+                      <tr key={t.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', background: isCurrent ? 'transparent' : 'rgba(255,255,255,0.01)' }}>
+                        <td style={{ padding: '10px 14px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                          {new Date(t.transactionDate).toLocaleDateString()} {new Date(t.transactionDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </td>
+                        <td style={{ padding: '10px 14px', fontWeight: 600, color: '#fff' }}>{t.hardwareId}</td>
+                        <td style={{ padding: '10px 14px', color: '#10b981', fontWeight: 700, fontSize: '0.95rem' }}>
+                          +{formatNaira(t.remittanceCredited || t.investorShareAmount)}
+                        </td>
+                        <td style={{ padding: '10px 14px' }}>
+                          {isCurrent ? (
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              background: 'rgba(16, 185, 129, 0.15)',
+                              color: '#10b981',
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              fontSize: '0.74rem',
+                              fontWeight: 700
+                            }}>
+                              ● Current Year (Active)
+                            </span>
+                          ) : (
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              background: 'rgba(148, 163, 184, 0.12)',
+                              color: '#94a3b8',
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              fontSize: '0.74rem',
+                              fontWeight: 600
+                            }}>
+                              Past Cycle ({t.cycleYear || new Date(t.transactionDate).getFullYear()})
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ padding: '10px 14px' }}>
+                          <span style={{
+                            background: 'rgba(16, 185, 129, 0.15)',
+                            color: '#10b981',
+                            padding: '2px 8px',
+                            borderRadius: '4px',
+                            fontSize: '0.74rem',
+                            fontWeight: 600
+                          }}>
+                            {t.status || 'Credited to Portfolio'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination Controls */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginTop: '14px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+              <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                Showing <strong style={{ color: '#fff' }}>{totalItems === 0 ? 0 : startIndex + 1}</strong> to <strong style={{ color: '#fff' }}>{rowsPerPage === 'all' ? totalItems : Math.min(startIndex + pageSize, totalItems)}</strong> of <strong style={{ color: '#fff' }}>{totalItems}</strong> entries
+                {filteredTransactions.length > 10 && <span style={{ marginLeft: '8px', color: 'var(--primary-accent)' }}>• Side scroll enabled</span>}
+              </div>
+
+              {rowsPerPage !== 'all' && totalPages > 1 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <button
+                    onClick={() => setCurrentPage(1)}
+                    disabled={safePage === 1}
+                    style={{
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      background: 'rgba(255,255,255,0.05)',
+                      border: '1px solid var(--border-color)',
+                      color: safePage === 1 ? 'var(--text-muted)' : '#fff',
+                      cursor: safePage === 1 ? 'not-allowed' : 'pointer',
+                      fontSize: '0.78rem'
+                    }}
+                    title="First Page"
+                  >
+                    « First
+                  </button>
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                    disabled={safePage === 1}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '4px',
+                      background: 'rgba(255,255,255,0.05)',
+                      border: '1px solid var(--border-color)',
+                      color: safePage === 1 ? 'var(--text-muted)' : '#fff',
+                      cursor: safePage === 1 ? 'not-allowed' : 'pointer',
+                      fontSize: '0.78rem'
+                    }}
+                  >
+                    ‹ Prev
+                  </button>
+
+                  <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)', padding: '0 6px' }}>
+                    Page <strong style={{ color: '#fff' }}>{safePage}</strong> of <strong style={{ color: '#fff' }}>{totalPages}</strong>
+                  </span>
+
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                    disabled={safePage === totalPages}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '4px',
+                      background: 'rgba(255,255,255,0.05)',
+                      border: '1px solid var(--border-color)',
+                      color: safePage === totalPages ? 'var(--text-muted)' : '#fff',
+                      cursor: safePage === totalPages ? 'not-allowed' : 'pointer',
+                      fontSize: '0.78rem'
+                    }}
+                  >
+                    Next ›
+                  </button>
+                  <button
+                    onClick={() => setCurrentPage(totalPages)}
+                    disabled={safePage === totalPages}
+                    style={{
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      background: 'rgba(255,255,255,0.05)',
+                      border: '1px solid var(--border-color)',
+                      color: safePage === totalPages ? 'var(--text-muted)' : '#fff',
+                      cursor: safePage === totalPages ? 'not-allowed' : 'pointer',
+                      fontSize: '0.78rem'
+                    }}
+                    title="Last Page"
+                  >
+                    Last »
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

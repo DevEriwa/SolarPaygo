@@ -1391,21 +1391,28 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
 
       {/* REGISTRATION MODAL */}
       {isRegisterOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.7)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '20px' }}>
-          <div className="glass-panel" style={{ width: '100%', maxWidth: '600px', margin: 0, maxHeight: '90vh', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
-              <h2 style={{ fontSize: '1.25rem', color: 'white', margin: 0 }}>Register New Prepaid Generator</h2>
-              <button onClick={() => setIsRegisterOpen(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '1.5rem', cursor: 'pointer' }}>&times;</button>
+        <div className="app-modal-backdrop">
+          <div className="app-modal-dialog">
+            <div className="app-modal-header">
+              <h2 style={{ fontSize: '1.25rem', color: 'white', margin: 0, fontWeight: 700 }}>Register New Prepaid Generator</h2>
+              <button 
+                type="button" 
+                onClick={() => setIsRegisterOpen(false)} 
+                className="app-modal-close-btn"
+                aria-label="Close"
+              >
+                &times;
+              </button>
             </div>
 
             {regError && (
-              <div style={{ background: 'var(--danger-bg)', color: 'var(--danger)', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '12px', borderRadius: '8px', marginBottom: '20px', fontSize: '0.9rem' }}>
+              <div style={{ background: 'var(--danger-bg)', color: 'var(--danger)', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontSize: '0.9rem' }}>
                 {regError}
               </div>
             )}
             
             {regSuccess && (
-              <div style={{ background: 'var(--success-bg)', color: 'var(--success)', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '12px', borderRadius: '8px', marginBottom: '20px', fontSize: '0.9rem', textAlign: 'center' }}>
+              <div style={{ background: 'var(--success-bg)', color: 'var(--success)', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontSize: '0.9rem', textAlign: 'center' }}>
                 Generator registered! Creating Squad Virtual Account...
               </div>
             )}
@@ -1415,25 +1422,25 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
               const selectedPct = selectedCapObj ? (selectedCapObj.overloadThresholdPercent || 90) : 90;
 
               return (
-                <form onSubmit={handleRegisterSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <form onSubmit={handleRegisterSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <div className="app-modal-grid-2">
                     <div>
                       <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Hardware ID (System Serial)</label>
                       <div style={{ position: 'relative' }}>
                         <Activity size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
-                        <input required type="text" value={regHardwareId} onChange={(e) => setRegHardwareId(e.target.value.toUpperCase())} placeholder="e.g. SG-007" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white' }} />
+                        <input required type="text" value={regHardwareId} onChange={(e) => setRegHardwareId(e.target.value.toUpperCase())} placeholder="e.g. SG-007" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }} />
                       </div>
                     </div>
                     <div>
                       <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Stron Smart Meter ID</label>
                       <div style={{ position: 'relative' }}>
                         <FileText size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
-                        <input required type="text" maxLength="12" value={regMeterId} onChange={(e) => setRegMeterId(e.target.value.replace(/\D/g, ''))} placeholder="e.g. 9013151606" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white' }} />
+                        <input required type="text" maxLength="12" value={regMeterId} onChange={(e) => setRegMeterId(e.target.value.replace(/\D/g, ''))} placeholder="e.g. 9013151606" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }} />
                       </div>
                     </div>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                  <div className="app-modal-grid-2">
                     <div>
                       <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>⚡ Generator Capacity</label>
                       <select required value={regGeneratorCapacity} onChange={(e) => setRegGeneratorCapacity(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }}>
@@ -1452,79 +1459,79 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                       </select>
                     </div>
                   </div>
-                  <span style={{ fontSize: '0.7rem', color: 'var(--warning)', marginTop: '-8px', display: 'block' }}>⚠️ Load must not exceed {selectedPct}% of this capacity or the relay will automatically trip off.</span>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--warning)', marginTop: '-4px', display: 'block', lineHeight: '1.4' }}>⚠️ Load must not exceed {selectedPct}% of this capacity or the relay will automatically trip off.</span>
 
-              <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Price Band (optional)</label>
-                <select value={regPricePlanId} onChange={(e) => setRegPricePlanId(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }}>
-                  <option value="">No band — standard pricing</option>
-                  {pricePlans.map(p => (
-                    <option key={p.id} value={p.id}>{p.name || `Band ${p.band}`} — ₦{p.pricePerKwh}/kWh</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Owner Full Name</label>
-                <div style={{ position: 'relative' }}>
-                  <User size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
-                  <input required type="text" value={regOwnerName} onChange={(e) => setRegOwnerName(e.target.value)} placeholder="e.g. Olamide Johnson" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '1rem' }} />
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Date of Birth</label>
+                    <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Price Band (optional)</label>
+                    <select value={regPricePlanId} onChange={(e) => setRegPricePlanId(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }}>
+                      <option value="">No band — standard pricing</option>
+                      {pricePlans.map(p => (
+                        <option key={p.id} value={p.id}>{p.name || `Band ${p.band}`} — ₦{p.pricePerKwh}/kWh</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Owner Full Name</label>
                     <div style={{ position: 'relative' }}>
-                      <input type="date" value={regDob} onChange={(e) => setRegDob(e.target.value)} required style={{ width: '100%', padding: '12px 12px 12px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white' }} />
+                      <User size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
+                      <input required type="text" value={regOwnerName} onChange={(e) => setRegOwnerName(e.target.value)} placeholder="e.g. Olamide Johnson" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }} />
                     </div>
                   </div>
+
+                  <div className="app-modal-grid-2">
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Date of Birth</label>
+                      <input type="date" value={regDob} onChange={(e) => setRegDob(e.target.value)} required style={{ width: '100%', padding: '11px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem', minHeight: '44px' }} />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Gender</label>
+                      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', minHeight: '44px' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.92rem', color: 'white', padding: '8px 14px', borderRadius: '8px', background: regGender === '1' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(255,255,255,0.04)', border: regGender === '1' ? '1px solid var(--primary-accent)' : '1px solid var(--border-color)', flex: 1, justifyContent: 'center', transition: 'all 0.2s' }}>
+                          <input type="radio" name="gender" value="1" checked={regGender === '1'} onChange={() => setRegGender('1')} style={{ accentColor: 'var(--primary-accent)', cursor: 'pointer' }} /> Male
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.92rem', color: 'white', padding: '8px 14px', borderRadius: '8px', background: regGender === '2' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(255,255,255,0.04)', border: regGender === '2' ? '1px solid var(--primary-accent)' : '1px solid var(--border-color)', flex: 1, justifyContent: 'center', transition: 'all 0.2s' }}>
+                          <input type="radio" name="gender" value="2" checked={regGender === '2'} onChange={() => setRegGender('2')} style={{ accentColor: 'var(--primary-accent)', cursor: 'pointer' }} /> Female
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="app-modal-grid-2">
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Customer Phone Number</label>
+                      <div style={{ position: 'relative' }}>
+                        <Phone size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
+                        <input required type="tel" value={regPhone} onChange={(e) => setRegPhone(e.target.value)} placeholder="e.g. 08123456787" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }} />
+                      </div>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Customer Email Address</label>
+                      <div style={{ position: 'relative' }}>
+                        <Mail size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
+                        <input required type="email" value={regEmail} onChange={(e) => setRegEmail(e.target.value)} placeholder="e.g. olamide@example.com" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }} />
+                      </div>
+                    </div>
+                  </div>
+
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Gender</label>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <label>
-                        <input type="radio" name="gender" value="1" checked={regGender === '1'} onChange={() => setRegGender('1')} /> Male
-                      </label>
-                      <label>
-                        <input type="radio" name="gender" value="2" checked={regGender === '2'} onChange={() => setRegGender('2')} /> Female
-                      </label>
+                    <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Bank Verification Number (BVN)</label>
+                    <div style={{ position: 'relative' }}>
+                      <BadgeCheck size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
+                      <input required type="text" maxLength="11" value={regBvn} onChange={(e) => setRegBvn(e.target.value.replace(/\D/g, ''))} placeholder="11-digit BVN for Squad profiling" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', letterSpacing: '2px', fontSize: '0.95rem' }} />
                     </div>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '4px', display: 'block', lineHeight: '1.4' }}>Note: BVN is strictly required by the Central Bank of Nigeria (CBN) to create dynamic payment virtual accounts.</span>
                   </div>
-                </div>
-              </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Customer Phone Number</label>
-                  <div style={{ position: 'relative' }}>
-                    <Phone size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
-                    <input required type="tel" value={regPhone} onChange={(e) => setRegPhone(e.target.value)} placeholder="e.g. 08123456787" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white' }} />
+                  <div className="app-modal-footer">
+                    <button type="button" onClick={() => setIsRegisterOpen(false)} className="action-btn" style={{ flex: 1, padding: '12px', minHeight: '44px' }} disabled={regLoading}>Cancel</button>
+                    <button type="submit" className="action-btn" style={{ flex: 1, padding: '12px', minHeight: '44px', background: 'var(--primary-accent)', color: 'var(--bg-dark)', borderColor: 'var(--primary-accent)', fontWeight: 600 }} disabled={regLoading}>
+                      {regLoading ? 'Registering & Profiling...' : 'Register Generator'}
+                    </button>
                   </div>
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Customer Email Address</label>
-                  <div style={{ position: 'relative' }}>
-                    <Mail size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
-                    <input required type="email" value={regEmail} onChange={(e) => setRegEmail(e.target.value)} placeholder="e.g. olamide@example.com" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white' }} />
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Bank Verification Number (BVN)</label>
-                <div style={{ position: 'relative' }}>
-                  <BadgeCheck size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
-                  <input required type="text" maxLength="11" value={regBvn} onChange={(e) => setRegBvn(e.target.value.replace(/\D/g, ''))} placeholder="11-digit BVN for Squad profiling" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', letterSpacing: '2px' }} />
-                </div>
-                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>Note: BVN is strictly required by the Central Bank of Nigeria (CBN) to create dynamic payment virtual accounts.</span>
-              </div>
-
-              <div style={{ display: 'flex', gap: '12px', marginTop: '16px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
-                <button type="button" onClick={() => setIsRegisterOpen(false)} className="action-btn" style={{ flex: 1, padding: '12px' }} disabled={regLoading}>Cancel</button>
-                <button type="submit" className="action-btn" style={{ flex: 1, padding: '12px', background: 'var(--primary-accent)', color: 'var(--bg-dark)', borderColor: 'var(--primary-accent)' }} disabled={regLoading}>
-                  {regLoading ? 'Registering & Profiling...' : 'Register Generator'}
-                </button>
-              </div>
-            </form>
-              );            })()}
+                </form>
+              );
+            })()}
           </div>
         </div>
       )}

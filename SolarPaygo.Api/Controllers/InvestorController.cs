@@ -235,7 +235,9 @@ namespace SolarPaygo.Api.Controllers
                         RemittanceCredited = eligibleTxShare,
                         InvestorShareAmount = eligibleTxShare,
                         t.TransactionDate,
-                        Status = statusText
+                        Status = statusText,
+                        IsCurrentCycle = isCurrentCycle,
+                        CycleYear = txCycleStart.Year
                     });
                 }
             }
@@ -358,7 +360,7 @@ namespace SolarPaygo.Api.Controllers
                     s.LastSyncTime
                 }),
                 Settlements = settlements,
-                RecentTransactions = processedTransactions.OrderByDescending(p => ((dynamic)p).TransactionDate).Take(30)
+                RecentTransactions = processedTransactions.OrderByDescending(p => ((dynamic)p).TransactionDate).Take(1000)
             });
         }
 
