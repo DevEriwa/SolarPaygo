@@ -1,4 +1,4 @@
-using SolarPaygo.Api.Models;
+﻿using SolarPaygo.Api.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -85,10 +85,6 @@ namespace SolarPaygo.Api.Services
                     return;
                 }
 
-                // Create a temporary DashboardController instance or invoke the helper directly.
-                // Since SyncSystemAndApplyBilling is private in DashboardController, we will implement it directly here
-                // or we can use reflection. Re-implementing the core sync logic here ensures clean separation
-                // from the HTTP request context.
                 foreach (var sys in systems)
                 {
                     if (cancellationToken.IsCancellationRequested) break;
@@ -107,7 +103,7 @@ namespace SolarPaygo.Api.Services
                             continue;
                         }
 
-                        // Offline Recharge Auto-Delivery: Deliver any pending offline tokens now that meter is online
+                        // 1. Offline Recharge Auto-Delivery: Deliver any pending offline tokens now that meter is online
                         var undeliveredTokens = await db.Transactions
                             .Where(t => t.SolarSystemId == sys.Id && !t.IsDeliveredToMeter && !string.IsNullOrEmpty(t.StsToken))
                             .OrderBy(t => t.TransactionDate)
@@ -137,7 +133,20 @@ namespace SolarPaygo.Api.Services
                                 sys.Status = "Active";
                                 sys.RelayState = "1";
                                 await vendingService.SetRemoteSwitchAsync(sys.StronMeterId, turnOn: true);
-                        // Auto-Vend from Wallet if meter is back online and wallet balance qualifies
+
+                                try
+                                {
+                                    var refreshed = await vendingService.QueryMeterStatusAsync(sys.StronMeterId, DateTime.UtcNow);
+                                    if (refreshed != null) status = refreshed;
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogWarning(ex, "[TelemetrySync] Error refreshing meter status after token delivery");
+                                }
+                            }
+                        }
+
+                        // 2. Auto-Vend from Wallet now that meter is confirmed online
                         decimal rate = PricingEngine.ResolveRate(sys);
                         decimal minThreshold = 0.1m * rate;
                         if (sys.PendingWalletBalance >= minThreshold)
@@ -145,7 +154,7 @@ namespace SolarPaygo.Api.Services
                             decimal unitsToReceive = Math.Round(sys.PendingWalletBalance / rate, 1, MidpointRounding.AwayFromZero);
                             if (unitsToReceive < 0.1m) unitsToReceive = 0.1m;
 
-                            _logger.LogInformation("[TelemetrySync] Meter {MeterId} is back ONLINE with wallet balance ₦{Bal}. Auto-vending {Units} kWh...", sys.StronMeterId, sys.PendingWalletBalance, unitsToReceive);
+                            _logger.LogInformation("[TelemetrySync] Meter {MeterId} is ONLINE with wallet balance N{Bal}. Auto-vending {Units} kWh...", sys.StronMeterId, sys.PendingWalletBalance, unitsToReceive);
                             var vendResult = await vendingService.GenerateVendingTokenAsync(sys.StronMeterId, unitsToReceive, isVendByUnit: true);
                             if (vendResult != null && !string.IsNullOrWhiteSpace(vendResult.Token))
                             {
@@ -195,19 +204,6 @@ namespace SolarPaygo.Api.Services
                             }
                         }
 
-
-                                try
-                                {
-                                    var refreshed = await vendingService.QueryMeterStatusAsync(sys.StronMeterId, DateTime.UtcNow);
-                                    if (refreshed != null) status = refreshed;
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger.LogWarning(ex, "[TelemetrySync] Error refreshing meter status after token delivery");
-                                }
-                            }
-                        }
-
                         // Update live telemetry data
                         sys.Voltage = status.Voltage;
                         sys.Current = status.Current;
@@ -215,7 +211,7 @@ namespace SolarPaygo.Api.Services
                         sys.CoverState = status.CoverState;
 
                         // Trust the meter's own reported remaining balance directly instead of
-                        // computing it locally — keeps the displayed "remaining kWh" in sync with
+                        // computing it locally - keeps the displayed "remaining kWh" in sync with
                         // the physical meter (including immediately after a Clear Credit reset).
                         sys.AvailableUnits = status.ResidualAmount;
 
@@ -226,7 +222,7 @@ namespace SolarPaygo.Api.Services
                             sys.MaxLoadWatts = capacityKw * 1000;
                         }
 
-                        // 2. Enforce Overload Cut-off
+                        // 3. Enforce Overload Cut-off
                         if (sys.Power > sys.MaxLoadWatts && sys.Status != "Locked")
                         {
                             _logger.LogWarning("[TelemetrySync] [Overload] System {Id} exceeded {Max}W. Current Power: {Power}W. Locking.", sys.Id, sys.MaxLoadWatts, sys.Power);
@@ -236,7 +232,7 @@ namespace SolarPaygo.Api.Services
                             continue; 
                         }
 
-                        // 3. Billing updates
+                        // 4. Billing updates
                         DateTime now = DateTime.UtcNow;
                         if (sys.LastSyncTime.HasValue)
                         {
@@ -258,10 +254,9 @@ namespace SolarPaygo.Api.Services
                                 sys.DailyKwhConsumed += kwhUsed;
                                 sys.DailyTimeActiveHours += (decimal)hoursElapsed;
                                 sys.CumulativeKwhConsumed += kwhUsed;
-                                // AvailableUnits is now set directly from status.ResidualAmount above.
 
-                                decimal rate = PricingEngine.ResolveRate(sys);
-                                decimal targetDailyCharge = PricingEngine.ComputeTargetDailyCharge(sys, rate);
+                                decimal rateVal = PricingEngine.ResolveRate(sys);
+                                decimal targetDailyCharge = PricingEngine.ComputeTargetDailyCharge(sys, rateVal);
                                 decimal amountToDeduct = targetDailyCharge - sys.DailyAmountCharged;
 
                                 if (amountToDeduct > 0)
@@ -276,7 +271,7 @@ namespace SolarPaygo.Api.Services
                                 {
                                     if (sys.Status != "Locked" || sys.RelayState != "0")
                                     {
-                                        _logger.LogWarning("[TelemetrySync] Balance depleted for system {Id} (Balance: ₦{Bal}, Units: {Units} kWh). Cutting power relay.", sys.Id, sys.PrepaidNairaBalance, sys.AvailableUnits);
+                                        _logger.LogWarning("[TelemetrySync] Balance depleted for system {Id} (Balance: N{Bal}, Units: {Units} kWh). Cutting power relay.", sys.Id, sys.PrepaidNairaBalance, sys.AvailableUnits);
                                         sys.Status = "Locked";
                                         sys.RelayState = "0";
                                         await vendingService.SetRemoteSwitchAsync(sys.StronMeterId, turnOn: false);
@@ -286,7 +281,7 @@ namespace SolarPaygo.Api.Services
                                 {
                                     if (sys.Status == "Locked" || sys.RelayState == "0")
                                     {
-                                        _logger.LogInformation("[TelemetrySync] Positive balance detected for system {Id} (Balance: ₦{Bal}, Units: {Units} kWh). Restoring power relay.", sys.Id, sys.PrepaidNairaBalance, sys.AvailableUnits);
+                                        _logger.LogInformation("[TelemetrySync] Positive balance detected for system {Id} (Balance: N{Bal}, Units: {Units} kWh). Restoring power relay.", sys.Id, sys.PrepaidNairaBalance, sys.AvailableUnits);
                                         sys.Status = "Active";
                                         sys.RelayState = "1";
                                         await vendingService.SetRemoteSwitchAsync(sys.StronMeterId, turnOn: true);

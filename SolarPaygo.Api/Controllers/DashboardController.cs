@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -708,6 +708,75 @@ namespace SolarPaygo.Api.Controllers
             return Ok(new { message = "Token successfully transmitted to the meter." });
         }
 
+        [Authorize(Roles = "Admin")]
+        [HttpPost("systems/{id}/redeem-wallet")]
+        public async Task<IActionResult> AdminRedeemWallet(int id)
+        {
+            var system = await _context.SolarSystems.Include(s => s.PricePlan).FirstOrDefaultAsync(s => s.Id == id);
+            if (system == null) return NotFound("Solar system not found.");
+
+            if (string.IsNullOrWhiteSpace(system.StronMeterId))
+                return BadRequest("No meter is linked to this system.");
+
+            decimal rate = PricingEngine.ResolveRate(system);
+            decimal minThreshold = 0.1m * rate;
+            if (system.PendingWalletBalance < minThreshold)
+                return BadRequest($"Pending wallet balance (N{system.PendingWalletBalance:N2}) is below the minimum threshold (N{minThreshold:N2}) to vend 0.1 kWh.");
+
+            decimal unitsToReceive = Math.Round(system.PendingWalletBalance / rate, 1, MidpointRounding.AwayFromZero);
+            if (unitsToReceive < 0.1m) unitsToReceive = 0.1m;
+
+            var vendResult = await _vendingService.GenerateVendingTokenAsync(system.StronMeterId, unitsToReceive, isVendByUnit: true);
+            if (vendResult == null || string.IsNullOrWhiteSpace(vendResult.Token))
+                return BadRequest("The meter vending server could not generate a token. Balance is preserved in wallet.");
+
+            string stsToken = vendResult.Token;
+            decimal actualUnitsVended = vendResult.Units > 0 ? vendResult.Units : unitsToReceive;
+            bool otaSuccess = await _vendingService.SendTokenRemotelyAsync(system.StronMeterId, stsToken);
+
+            decimal usedAmount = Math.Round(actualUnitsVended * rate, 2);
+            decimal walletAfter = Math.Max(0m, system.PendingWalletBalance - usedAmount);
+
+            var tx = new Transaction
+            {
+                SolarSystemId = system.Id,
+                AmountPaid = usedAmount,
+                UnitsAdded = actualUnitsVended,
+                UsedAmount = usedAmount,
+                AddedToWallet = 0m,
+                WalletBalanceAfter = walletAfter,
+                RateAtTime = rate,
+                Status = "Completed",
+                StsToken = stsToken,
+                PaymentReference = "ADMIN_WALLET_" + DateTime.UtcNow.ToString("yyyyMMddHHmmss"),
+                TransactionDate = DateTime.UtcNow,
+                IsDeliveredToMeter = otaSuccess
+            };
+
+            system.AvailableUnits += actualUnitsVended;
+            system.CumulativeKwhBought += actualUnitsVended;
+            system.PendingWalletBalance = walletAfter;
+
+            if (system.AvailableUnits > 0 || system.PrepaidNairaBalance > 0)
+            {
+                system.Status = "Active";
+                system.RelayState = "1";
+                await _vendingService.SetRemoteSwitchAsync(system.StronMeterId, turnOn: true);
+            }
+
+            _context.Transactions.Add(tx);
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                success = true,
+                token = stsToken,
+                unitsAdded = actualUnitsVended,
+                walletBalance = walletAfter,
+                message = $"Successfully vended {actualUnitsVended:F2} kWh from wallet to meter {system.StronMeterId}."
+            });
+        }
+
         // Helper Split Name Methods for Squad Model
         private string GetFirstName(string fullName)
         {
@@ -894,3 +963,4 @@ namespace SolarPaygo.Api.Controllers
 
     }
 }
+

@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Configuration;
+﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
@@ -38,7 +38,8 @@ namespace SolarPaygo.Api.Services
             {
                 _logger.LogInformation("[Stron] Generating token for Meter ID: {MeterId}, amount/unit: {Amount}", meterId, amount);
 
-                var payload = new
+                // 1. Try remote vending first (VendingMeterRemotely)
+                var remotePayload = new
                 {
                     CompanyName = config.Company,
                     UserName = config.User,
@@ -48,85 +49,111 @@ namespace SolarPaygo.Api.Services
                     Amount = amount.ToString("F2")
                 };
 
-                var response = await _httpClient.PostAsJsonAsync($"{config.BaseUrl.TrimEnd('/')}/api/VendingMeterRemotely", payload);
-
-                if (response.IsSuccessStatusCode)
+                try
                 {
-                    var raw = await response.Content.ReadAsStringAsync();
-                    _logger.LogInformation("[Stron] Raw response: {Raw}", raw);
-                    
-                    using var doc = JsonDocument.Parse(raw);
-                    JsonElement root = doc.RootElement;
-                    JsonElement targetElement = root;
-
-                    if (root.ValueKind == JsonValueKind.Array)
+                    var response = await _httpClient.PostAsJsonAsync($"{config.BaseUrl.TrimEnd('/')}/api/VendingMeterRemotely", remotePayload);
+                    if (response.IsSuccessStatusCode)
                     {
-                        if (root.GetArrayLength() > 0)
-                        {
-                            targetElement = root[0];
-                        }
-                        else
-                        {
-                            _logger.LogWarning("[Stron] Empty array returned.");
-                            return null;
-                        }
+                        var raw = await response.Content.ReadAsStringAsync();
+                        _logger.LogInformation("[Stron] Remote vending raw response: {Raw}", raw);
+                        var parsed = TryParseVendingResponse(raw);
+                        if (parsed != null) return parsed;
                     }
-
-                    string token = "";
-                    if (targetElement.TryGetProperty("Token", out var tokenProp))
-                        token = tokenProp.GetString() ?? "";
-                    else if (targetElement.TryGetProperty("token", out var tokenProp2))
-                        token = tokenProp2.GetString() ?? "";
-
-                    string unit = "";
-                    if (targetElement.TryGetProperty("Total_unit", out var unitProp))
-                        unit = unitProp.GetString() ?? "";
-                    else if (targetElement.TryGetProperty("total_unit", out var unitProp2))
-                        unit = unitProp2.GetString() ?? "";
-                    else if (targetElement.TryGetProperty("Unit", out var unitProp3))
-                        unit = unitProp3.GetString() ?? "";
-
-                    string price = "";
-                    if (targetElement.TryGetProperty("Price", out var priceProp))
-                        price = priceProp.GetString() ?? "";
-                    else if (targetElement.TryGetProperty("price", out var priceProp2))
-                        price = priceProp2.GetString() ?? "";
-
-                    if (!string.IsNullOrEmpty(token))
+                    else
                     {
-                        _logger.LogInformation("[Stron] Successfully parsed token: {Token} ({Unit} units)", token, unit);
-                        decimal.TryParse(unit, out var unitDecimal);
-                        decimal.TryParse(price, out var priceDecimal);
-
-                        return new StronVendingResponse
-                        {
-                            Token = FormatToken(token),
-                            Units = unitDecimal,
-                            Price = priceDecimal
-                        };
+                        var err = await response.Content.ReadAsStringAsync();
+                        _logger.LogWarning("[Stron] VendingMeterRemotely failed (Status={Status}): {Error}. Falling back to standard VendingMeter.", response.StatusCode, err);
                     }
-                    _logger.LogWarning("[Stron] Vending returned success status but token was missing or empty.");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[Stron] VendingMeterRemotely exception. Falling back to standard VendingMeter for meter {MeterId}.", meterId);
+                }
+
+                // 2. Fallback to standard VendingMeter (generates STS token reliably even if meter cellular is offline)
+                _logger.LogInformation("[Stron] Calling standard /api/VendingMeter for meter {MeterId}...", meterId);
+                var standardPayload = new
+                {
+                    CompanyName = config.Company,
+                    UserName = config.User,
+                    PassWord = config.Pass,
+                    MeterID = meterId,
+                    is_vend_by_unit = isVendByUnit ? "1" : "0",
+                    Amount = amount.ToString("F2")
+                };
+
+                var stdResponse = await _httpClient.PostAsJsonAsync($"{config.BaseUrl.TrimEnd('/')}/api/VendingMeter", standardPayload);
+                if (stdResponse.IsSuccessStatusCode)
+                {
+                    var stdRaw = await stdResponse.Content.ReadAsStringAsync();
+                    _logger.LogInformation("[Stron] Standard VendingMeter raw response: {Raw}", stdRaw);
+                    var stdParsed = TryParseVendingResponse(stdRaw);
+                    if (stdParsed != null) return stdParsed;
                 }
                 else
                 {
-                    var err = await response.Content.ReadAsStringAsync();
-                    _logger.LogWarning("[Stron] Vending failed: Status={Status}, Error={Error}", response.StatusCode, err);
+                    var stdErr = await stdResponse.Content.ReadAsStringAsync();
+                    _logger.LogError("[Stron] Both VendingMeterRemotely and standard VendingMeter failed. Status={Status}, Error={Error}", stdResponse.StatusCode, stdErr);
                 }
-            }
-            catch (HttpRequestException ex)
-            {
-                _logger.LogError(ex, "[Stron] Network error contacting Stron API for meter {MeterId}. The meter server may be offline.", meterId);
-            }
-            catch (TaskCanceledException ex)
-            {
-                _logger.LogError(ex, "[Stron] Request to Stron API timed out for meter {MeterId}.", meterId);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "[Stron] Unexpected error during vending for meter {MeterId}.", meterId);
+                _logger.LogError(ex, "[Stron] Unexpected error during token generation for meter {MeterId}.", meterId);
             }
 
-            // Return null — no mock fallback. Caller must handle null as a hard failure and reject the transaction.
+            return null;
+        }
+
+        private StronVendingResponse? TryParseVendingResponse(string raw)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(raw);
+                JsonElement root = doc.RootElement;
+                JsonElement targetElement = root;
+
+                if (root.ValueKind == JsonValueKind.Array)
+                {
+                    if (root.GetArrayLength() > 0)
+                        targetElement = root[0];
+                    else
+                        return null;
+                }
+
+                string token = "";
+                if (targetElement.TryGetProperty("Token", out var tokenProp))
+                    token = tokenProp.GetString() ?? "";
+                else if (targetElement.TryGetProperty("token", out var tokenProp2))
+                    token = tokenProp2.GetString() ?? "";
+
+                string unit = "";
+                if (targetElement.TryGetProperty("Total_unit", out var unitProp))
+                    unit = unitProp.GetString() ?? "";
+                else if (targetElement.TryGetProperty("total_unit", out var unitProp2))
+                    unit = unitProp2.GetString() ?? "";
+                else if (targetElement.TryGetProperty("Unit", out var unitProp3))
+                    unit = unitProp3.GetString() ?? "";
+
+                string price = "";
+                if (targetElement.TryGetProperty("Price", out var priceProp))
+                    price = priceProp.GetString() ?? "";
+                else if (targetElement.TryGetProperty("price", out var priceProp2))
+                    price = priceProp2.GetString() ?? "";
+
+                if (!string.IsNullOrEmpty(token))
+                {
+                    decimal.TryParse(unit, out var unitDecimal);
+                    decimal.TryParse(price, out var priceDecimal);
+
+                    return new StronVendingResponse
+                    {
+                        Token = FormatToken(token),
+                        Units = unitDecimal,
+                        Price = priceDecimal
+                    };
+                }
+            }
+            catch { }
             return null;
         }
 
@@ -196,7 +223,7 @@ namespace SolarPaygo.Api.Services
                             }
                             else if (key == "relay_state")
                             {
-                                relayState = val.ToLower().Contains("off") ? "0" : "1";
+                                relayState = val.ToLower().Contains("open") || val.ToLower().Contains("off") || val == "0" ? "0" : "1";
                             }
                             else if (key == "cover_state")
                             {
@@ -238,7 +265,6 @@ namespace SolarPaygo.Api.Services
                 _logger.LogWarning("[Stron] Unexpected error querying meter {MeterId}: {Message}", meterId, ex.Message);
             }
 
-            // Return null — billing sync will skip this system gracefully if the meter is unreachable.
             return null;
         }
 
@@ -282,7 +308,6 @@ namespace SolarPaygo.Api.Services
                 _logger.LogError(ex, "[Stron] Unexpected error during remote switch for meter {MeterId}.", meterId);
             }
 
-            // Return false — the caller knows the hardware command did not execute.
             return false;
         }
 
