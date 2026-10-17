@@ -189,7 +189,7 @@ export default function CustomerDashboard() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // handleSimulatePayment kept for possible admin/debug use â€” not shown in UI
+  // handleSimulatePayment kept for possible admin/debug use — not shown in UI
   const handleSimulatePayment = async (e) => {
     e.preventDefault();
     setSimulateLoading(true);
@@ -206,7 +206,7 @@ export default function CustomerDashboard() {
       });
 
       if (response.ok) {
-        setSimulateMessage({ type: 'success', text: `Payment of â‚¦${simulateAmount} simulated successfully!` });
+        setSimulateMessage({ type: 'success', text: `Payment of ₦${simulateAmount} simulated successfully!` });
         setSimulateAmount('');
         refetch();
       } else {
@@ -555,7 +555,7 @@ export default function CustomerDashboard() {
                 </span>
                 {plan && (
                   <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>
-                    — {plan.name || plan.band}
+                  — {plan.name || plan.band}
                   </span>
                 )}
               </div>
@@ -621,7 +621,7 @@ export default function CustomerDashboard() {
       <div style={{ marginTop: '-16px', marginBottom: '24px' }}>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginBottom: '10px' }}>
           <Coins size={12} style={{ verticalAlign: 'middle', marginRight: '4px' }} />
-          Pending Wallet is money you've paid that hasn't converted into an energy token yet â€” it converts automatically once it reaches the minimum for your rate, or you can redeem it now below.
+          Pending Wallet is money you've paid that hasn't converted into an energy token yet — it converts automatically once it reaches the minimum for your rate, or you can redeem it now below.
         </p>
         <button
           onClick={handleRedeemWallet}
@@ -677,7 +677,7 @@ export default function CustomerDashboard() {
             </div>
           </div>
 
-          {/* Simulation Tools â€” HIDDEN from customer-facing production view */}
+          {/* Simulation Tools — HIDDEN from customer-facing production view */}
           {/* COMMENTED OUT: not shown to customers in live environment
           <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '20px' }}>
             <h3 style={{ fontSize: '1rem', color: 'var(--text-muted)', marginBottom: '12px' }}>Test / Simulate Transfer</h3>
@@ -690,7 +690,7 @@ export default function CustomerDashboard() {
               </div>
             )}
             <form onSubmit={handleSimulatePayment} style={{ display: 'flex', gap: '10px' }}>
-              <input type="number" placeholder="Amount (â‚¦)" value={simulateAmount}
+              <input type="number" placeholder="Amount (₦)" value={simulateAmount}
                 onChange={(e) => setSimulateAmount(e.target.value)} required min="100"
                 style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white' }} />
               <button type="submit" disabled={simulateLoading}
@@ -702,7 +702,7 @@ export default function CustomerDashboard() {
           END COMMENTED OUT */}
         </div>
 
-        {/* Transaction History â€” detailed view matching admin panel */}
+        {/* Transaction History — detailed view matching admin panel */}
         <div className="glass-panel">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
             <History size={20} color="var(--primary-accent)" />
@@ -732,18 +732,18 @@ export default function CustomerDashboard() {
                       <td style={{ padding: '10px', fontWeight: 700, color: 'var(--success)' }}>
                         {formatNaira(tx.amountPaid)}
                       </td>
-                      {/* Older transactions may not have usedAmount â€” show a dash rather than misleading 0 */}
+                      {/* Older transactions may not have usedAmount — show a dash rather than misleading 0 */}
                       <td style={{ padding: '10px', color: 'var(--text-muted)' }}>
-                        {tx.usedAmount != null ? formatNaira(tx.usedAmount) : 'â€”'}
+                        {tx.usedAmount != null ? formatNaira(tx.usedAmount) : ' — '}
                       </td>
                       <td style={{ padding: '10px', color: 'var(--primary-accent)', fontWeight: 600 }}>
                         +{tx.unitsAdded?.toFixed(2)} kWh
                       </td>
                       <td style={{ padding: '10px', color: tx.addedToWallet ? 'var(--primary-accent)' : 'var(--text-muted)' }}>
-                        {tx.addedToWallet != null ? formatNaira(tx.addedToWallet) : 'â€”'}
+                        {tx.addedToWallet != null ? formatNaira(tx.addedToWallet) : ' — '}
                       </td>
                       <td style={{ padding: '10px', color: 'var(--text-muted)' }}>
-                        {tx.walletBalanceAfter != null ? formatNaira(tx.walletBalanceAfter) : 'â€”'}
+                        {tx.walletBalanceAfter != null ? formatNaira(tx.walletBalanceAfter) : ' — '}
                       </td>
                       <td style={{ padding: '10px' }}>
                         <span style={{

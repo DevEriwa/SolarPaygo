@@ -74,7 +74,7 @@ export default function ContactPage() {
             {/*
               To set the exact office pin:
               1. Find the address in Google Maps
-              2. Click Share â†’ Embed a map
+              2. Click Share → Embed a map
               3. Replace the src below with your embed URL
             */}
             <iframe

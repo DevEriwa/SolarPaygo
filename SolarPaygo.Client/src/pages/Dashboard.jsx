@@ -442,7 +442,7 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
             gap: '6px'
           }}
         >
-          âš¡ Generators & Telemetry
+          ⚡ Generators & Telemetry
         </button>
         <button 
           onClick={() => setActiveView('customers')} 
@@ -461,7 +461,7 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
             gap: '6px'
           }}
         >
-          ðŸ‘¤ Customer Profiles & Payments
+          👤 Customer Profiles & Payments
         </button>
         <button 
           onClick={() => setActiveView('investors')} 
@@ -480,7 +480,7 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
             gap: '6px'
           }}
         >
-          ðŸ’¼ Investor Payouts & Yields
+          💼 Investor Payouts & Yields
         </button>
       </div>
 
@@ -516,7 +516,7 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
         {deviceGroups.length > 0 && (
           <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', overflowX: 'auto', paddingBottom: '8px', borderBottom: '1px solid var(--border-color)' }}>
             <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', fontWeight: 'bold', marginRight: '4px' }}>
-              ðŸ·ï¸ Group Tabs:
+              🏷️ Group Tabs:
             </span>
             <button
               className={`filter-tab ${selectedGroupTab === 'All' ? 'active' : ''}`}
@@ -590,7 +590,7 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
 
         {relayError && (
           <div style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)', color: 'var(--danger)', borderRadius: '8px', padding: '10px 16px', margin: '0 0 12px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.88rem' }}>
-            <span>âš ï¸ {relayError}</span>
+            <span>⚠️ {relayError}</span>
             <button onClick={() => setRelayError(null)} style={{ background: 'transparent', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: '1.1rem', lineHeight: 1 }}>Ã—</button>
           </div>
         )}
@@ -644,12 +644,12 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                       <div style={{ marginTop: '4px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                         {sys.generatorCapacity && (
                           <span style={{ background: 'rgba(250,200,50,0.12)', color: '#f5c842', padding: '2px 7px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold', fontFamily: 'monospace' }}>
-                            âš¡ {sys.generatorCapacity}
+                            ⚡ {sys.generatorCapacity}
                           </span>
                         )}
                         {sys.deviceGroup ? (
                           <span style={{ background: 'rgba(59,130,246,0.15)', color: '#3b82f6', padding: '2px 7px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold' }}>
-                            ðŸ·ï¸ {sys.deviceGroup.name}
+                            🏷️ {sys.deviceGroup.name}
                           </span>
                         ) : null}
                       </div>
@@ -688,11 +688,11 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                         )}
                         {isDiscounted ? (
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: 'rgba(16,185,129,0.15)', color: 'var(--success)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold', width: 'fit-content' }}>
-                            <BadgeCheck size={10} /> {plan ? `${plan.loyaltyDiscountPercent}% Disc.` : '50% Disc.'} (â‚¦{effectiveRate.toFixed(0)}/kWh)
+                            <BadgeCheck size={10} /> {plan ? `${plan.loyaltyDiscountPercent}% Disc.` : '50% Disc.'} (₦{effectiveRate.toFixed(0)}/kWh)
                           </span>
                         ) : (
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: 'rgba(255,255,255,0.03)', color: 'var(--text-muted)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.7rem', width: 'fit-content' }}>
-                            Std. Tariff (â‚¦{effectiveRate.toFixed(0)}/kWh)
+                            Std. Tariff (₦{effectiveRate.toFixed(0)}/kWh)
                           </span>
                         )}
                       </div>
@@ -738,8 +738,8 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                           {remaining.toFixed(2)} kWh remaining
                         </div>
                         <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '1px' }}>
-                          <span>ðŸ“¥ Bought: <strong>{totalBought.toFixed(2)} kWh</strong></span>
-                          <span>ðŸ“¤ Used: <strong>{totalUsed.toFixed(2)} kWh</strong></span>
+                          <span>📥 Bought: <strong>{totalBought.toFixed(2)} kWh</strong></span>
+                          <span>📤 Used: <strong>{totalUsed.toFixed(2)} kWh</strong></span>
                         </div>
                       </div>
                     </td>
@@ -749,7 +749,7 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                       <div className="action-buttons" style={{ display: 'flex', gap: '8px' }}>
                         {relayLoading === sys.id ? (
                           <button className="action-btn" style={{ padding: '6px 12px', opacity: 0.6 }} disabled>
-                            â³ Sending...
+                            ⏳ Sending...
                           </button>
                         ) : sys.relayState === '0' || sys.RelayState === '0' ? (
                           <button onClick={(e) => { e.stopPropagation(); handleToggleState(sys.id, 'relay-on'); }} className="action-btn unlock" style={{ padding: '6px 12px' }}>
@@ -770,7 +770,7 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                           className="action-btn" 
                           style={{ padding: '6px 12px', background: expandedSystemId === sys.id ? 'var(--primary-accent)' : 'rgba(255,255,255,0.03)', borderColor: expandedSystemId === sys.id ? 'var(--primary-accent)' : 'var(--border-color)', color: expandedSystemId === sys.id ? 'var(--bg-dark)' : 'white' }}
                         >
-                          âš™ï¸ Manage Stron
+                          ⚙️ Manage Stron
                         </button>
                       </div>
                     </td>
@@ -784,7 +784,7 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                           {/* Stron Remote Operations */}
                           <div>
                             <h4 style={{ color: 'white', marginBottom: '16px', fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              âš¡ Hunan Stron AMI Smart Meter Commands
+                              ⚡ Hunan Stron AMI Smart Meter Commands
                             </h4>
                             
                             <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
@@ -794,7 +794,7 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                                 className="action-btn" 
                                 style={{ flex: 1, padding: '10px', background: 'rgba(245, 158, 11, 0.12)', color: 'var(--warning)', borderColor: 'rgba(245, 158, 11, 0.4)' }}
                               >
-                                {adminActionLoading ? 'â³ Processing...' : 'Clear Tamper State'}
+                                {adminActionLoading ? '⏳ Processing...' : 'Clear Tamper State'}
                               </button>
                               
                               <button 
@@ -807,7 +807,7 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                                 className="action-btn" 
                                 style={{ flex: 1, padding: '10px', background: 'rgba(239, 68, 68, 0.12)', color: 'var(--danger)', borderColor: 'rgba(239, 68, 68, 0.4)' }}
                               >
-                                {adminActionLoading ? 'â³ Processing...' : 'Clear Credit (Reset)'}
+                                {adminActionLoading ? '⏳ Processing...' : 'Clear Credit (Reset)'}
                               </button>
                             </div>
 
@@ -856,11 +856,11 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
 
                           {/* Meter Diagnostics Column */}
                           <div style={{ borderLeft: '1px solid var(--border-color)', paddingLeft: '24px' }}>
-                            <h4 style={{ color: 'white', marginBottom: '16px', fontSize: '0.95rem' }}>ðŸ“‹ Live Telemetry Diagnostics</h4>
+                            <h4 style={{ color: 'white', marginBottom: '16px', fontSize: '0.95rem' }}>📋 Live Telemetry Diagnostics</h4>
                             <div style={{ background: 'var(--bg-dark)', padding: '12px', borderRadius: '6px', fontSize: '0.8rem', fontFamily: 'monospace', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                              <div><span style={{ color: 'white' }}>Meter Status:</span> {sys.meterOnline || sys.MeterOnline ? 'ðŸŸ¢ Online (Connected)' : 'ðŸ”´ Offline (Unreachable)'}</div>
+                              <div><span style={{ color: 'white' }}>Meter Status:</span> {sys.meterOnline || sys.MeterOnline ? '🟢 Online (Connected)' : '🔴 Offline (Unreachable)'}</div>
                               <div><span style={{ color: 'white' }}>Physical Switch (Relay):</span> {sys.relayState === '1' ? 'Closed (Power ON)' : 'Open (Power OFF)'}</div>
-                              <div><span style={{ color: 'white' }}>Cover State (Tamper):</span> {sys.coverState === '1' ? 'âš ï¸ TAMPER ACTIVE (OPEN)' : 'Normal'}</div>
+                              <div><span style={{ color: 'white' }}>Cover State (Tamper):</span> {sys.coverState === '1' ? '⚠️ TAMPER ACTIVE (OPEN)' : 'Normal'}</div>
                               <div><span style={{ color: 'white' }}>Voltage / Current:</span> {sys.voltage?.toFixed(1) || '0.0'} V / {sys.current?.toFixed(2) || '0.00'} A</div>
                               <div><span style={{ color: 'white' }}>Active Load Draw:</span> {sys.power?.toFixed(0) || '0'} W (Max: {sys.maxLoadWatts || 2000} W)</div>
                               <div><span style={{ color: 'white' }}>Cumulative Consumption:</span> {totalUsed.toFixed(2)} kWh</div>
@@ -920,7 +920,7 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
           {/* Device Group / Tab Selector */}
           <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', overflowX: 'auto', paddingBottom: '8px', borderBottom: '1px solid var(--border-color)', alignItems: 'center' }}>
             <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', fontWeight: 'bold', marginRight: '4px' }}>
-              ðŸ·ï¸ Group Tabs:
+              🏷️ Group Tabs:
             </span>
             <button
               className={`filter-tab ${selectedGroupTab === 'All' ? 'active' : ''}`}
@@ -984,7 +984,7 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
 
           {bandAssignError && (
             <div style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)', color: 'var(--danger)', borderRadius: '8px', padding: '10px 16px', margin: '0 0 12px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.88rem' }}>
-              <span>âš ï¸ {bandAssignError}</span>
+              <span>⚠️ {bandAssignError}</span>
               <button onClick={() => setBandAssignError(null)} style={{ background: 'transparent', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: '1.1rem', lineHeight: 1 }}>Ã—</button>
             </div>
           )}
@@ -1002,7 +1002,7 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
               alignItems: 'center',
               fontSize: '0.88rem'
             }}>
-              <span>{overloadNotice.type === 'success' ? 'âœ…' : 'âš ï¸'} {overloadNotice.text}</span>
+              <span>{overloadNotice.type === 'success' ? '✅' : '⚠️'} {overloadNotice.text}</span>
               <button onClick={() => setOverloadNotice(null)} style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '1.2rem', lineHeight: 1 }}>Ã—</button>
             </div>
           )}
@@ -1020,7 +1020,7 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
               alignItems: 'center',
               fontSize: '0.88rem'
             }}>
-              <span>{adminPasswordNotice.type === 'success' ? 'ðŸ”‘' : 'âš ï¸'} {adminPasswordNotice.text}</span>
+              <span>{adminPasswordNotice.type === 'success' ? '🔑' : '⚠️'} {adminPasswordNotice.text}</span>
               <button onClick={() => setAdminPasswordNotice(null)} style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '1.2rem', lineHeight: 1 }}>Ã—</button>
             </div>
           )}
@@ -1059,8 +1059,8 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                         <td>
                           <div style={{ fontWeight: 'bold', color: 'white', fontSize: '0.95rem' }}>{sys.ownerName || 'Unnamed Customer'}</div>
                           <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                            <span>ðŸ“§ {sys.customerEmail || 'No Email'}</span>
-                            <span>ðŸ“ž {sys.customerPhone || 'No Phone'}</span>
+                            <span>📧 {sys.customerEmail || 'No Email'}</span>
+                            <span>📞 {sys.customerPhone || 'No Phone'}</span>
                           </div>
                         </td>
 
@@ -1075,12 +1075,12 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                           <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
                             {sys.generatorCapacity && (
                               <span style={{ background: 'rgba(250,200,50,0.1)', color: '#f5c842', padding: '2px 6px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 'bold' }}>
-                                âš¡ {sys.generatorCapacity} Generator
+                                ⚡ {sys.generatorCapacity} Generator
                               </span>
                             )}
                             {sys.deviceGroup ? (
                               <span style={{ background: 'rgba(59,130,246,0.15)', color: '#3b82f6', padding: '2px 6px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 'bold' }}>
-                                ðŸ·ï¸ {sys.deviceGroup.name}
+                                🏷️ {sys.deviceGroup.name}
                               </span>
                             ) : null}
                           </div>
@@ -1113,7 +1113,7 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                             </span>
                             <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                               <span style={{ color: sys.relayState === '1' ? 'var(--success)' : 'var(--danger)' }}>
-                                {sys.relayState === '1' ? 'âš¡ Relay ON' : 'â­• Relay Cut'}
+                                {sys.relayState === '1' ? '⚡ Relay ON' : '⭕ Relay Cut'}
                               </span>
                               {(sys.isOverloaded || sys.IsOverloaded) && (
                                 <span style={{
@@ -1125,7 +1125,7 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                                   fontWeight: 700,
                                   border: '1px solid rgba(245, 158, 11, 0.4)'
                                 }}>
-                                  âš ï¸ Overloaded
+                                  ⚠️ Overloaded
                                 </span>
                               )}
                             </div>
@@ -1240,7 +1240,7 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                               {/* Complete Profile Cards */}
                               <div>
                                 <h3 style={{ color: 'white', marginBottom: '16px', fontSize: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  ðŸ‘¤ Profile Details
+                                  👤 Profile Details
                                 </h3>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '0.85rem' }}>
                                   <div><strong style={{ color: 'var(--text-muted)' }}>Full Name:</strong> <span style={{ color: 'white' }}>{sys.ownerName}</span></div>
@@ -1259,7 +1259,7 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                                       onClick={(e) => e.stopPropagation()}
                                       style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.85rem' }}
                                     >
-                                      <option value="">No Group â€” Ungrouped</option>
+                                      <option value="">No Group — Ungrouped</option>
                                       {deviceGroups.map(g => (
                                         <option key={g.id} value={g.id}>{g.name}</option>
                                       ))}
@@ -1305,9 +1305,9 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                                       onClick={(e) => e.stopPropagation()}
                                       style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.85rem' }}
                                     >
-                                      <option value="">No band â€” standard pricing</option>
+                                      <option value="">No band — standard pricing</option>
                                       {pricePlans.map(p => (
-                                        <option key={p.id} value={p.id}>{p.name || `Band ${p.band}`} â€” â‚¦{p.pricePerKwh}/kWh</option>
+                                        <option key={p.id} value={p.id}>{p.name || `Band ${p.band}`} — ₦{p.pricePerKwh}/kWh</option>
                                       ))}
                                     </select>
                                     {bandAssignLoading === sys.id && (
@@ -1353,10 +1353,10 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                               {/* Payment history */}
                               <div>
                                 <h3 style={{ color: 'white', marginBottom: '16px', fontSize: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  ðŸ’³ Transaction & STS Token History
+                                  💳 Transaction & STS Token History
                                 </h3>
                                 {txsLoading ? (
-                                  <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', padding: '20px 0' }}>â³ Fetching records from payment gateway...</div>
+                                  <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', padding: '20px 0' }}>⏳ Fetching records from payment gateway...</div>
                                 ) : txs.length === 0 ? (
                                   <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', padding: '20px 0' }}>No transactions recorded for this customer.</div>
                                 ) : (
@@ -1382,14 +1382,14 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                                                 transactions predate it being kept, and showing 0 would read as
                                                 "none of this bought units", which is a different claim entirely. */}
                                             <td style={{ padding: '8px', color: 'var(--text-muted)' }}>
-                                              {tx.usedAmount != null ? formatNaira(tx.usedAmount) : 'â€”'}
+                                              {tx.usedAmount != null ? formatNaira(tx.usedAmount) : ' — '}
                                             </td>
                                             <td style={{ padding: '8px', color: 'white' }}>{tx.unitsAdded?.toFixed(2)} kWh</td>
                                             <td style={{ padding: '8px', color: tx.addedToWallet ? 'var(--primary-accent)' : 'var(--text-muted)' }}>
-                                              {tx.addedToWallet != null ? formatNaira(tx.addedToWallet) : 'â€”'}
+                                              {tx.addedToWallet != null ? formatNaira(tx.addedToWallet) : ' — '}
                                             </td>
                                             <td style={{ padding: '8px', color: 'var(--text-muted)' }}>
-                                              {tx.walletBalanceAfter != null ? formatNaira(tx.walletBalanceAfter) : 'â€”'}
+                                              {tx.walletBalanceAfter != null ? formatNaira(tx.walletBalanceAfter) : ' — '}
                                             </td>
                                             <td style={{ padding: '8px', fontFamily: 'monospace', color: 'var(--primary-accent)', fontWeight: 'bold' }}>{tx.stsToken || 'OTA Sent'}</td>
                                           </tr>
@@ -1476,31 +1476,31 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
 
                   <div className="app-modal-grid-2">
                     <div>
-                      <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>âš¡ Generator Capacity</label>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>⚡ Generator Capacity</label>
                       <select required value={regGeneratorCapacity} onChange={(e) => setRegGeneratorCapacity(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }}>
                         {capacities.map(c => (
-                          <option key={c.id ?? c.code} value={c.code}>{c.code} â€“ {c.name}</option>
+                          <option key={c.id ?? c.code} value={c.code}>{c.code} – {c.name}</option>
                         ))}
                       </select>
                     </div>
                     <div>
-                      <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>ðŸ·ï¸ Tab/Group List</label>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>🏷️ Tab/Group List</label>
                       <select value={regDeviceGroupId} onChange={(e) => setRegDeviceGroupId(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }}>
-                        <option value="">No Group â€” Ungrouped</option>
+                        <option value="">No Group — Ungrouped</option>
                         {deviceGroups.map(g => (
                           <option key={g.id} value={g.id}>{g.name}</option>
                         ))}
                       </select>
                     </div>
                   </div>
-                  <span style={{ fontSize: '0.72rem', color: 'var(--warning)', marginTop: '-4px', display: 'block', lineHeight: '1.4' }}>âš ï¸ Load must not exceed {selectedPct}% of this capacity or the relay will automatically trip off.</span>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--warning)', marginTop: '-4px', display: 'block', lineHeight: '1.4' }}>⚠️ Load must not exceed {selectedPct}% of this capacity or the relay will automatically trip off.</span>
 
                   <div>
                     <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Price Band (optional)</label>
                     <select value={regPricePlanId} onChange={(e) => setRegPricePlanId(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }}>
-                      <option value="">No band â€” standard pricing</option>
+                      <option value="">No band — standard pricing</option>
                       {pricePlans.map(p => (
-                        <option key={p.id} value={p.id}>{p.name || `Band ${p.band}`} â€” â‚¦{p.pricePerKwh}/kWh</option>
+                        <option key={p.id} value={p.id}>{p.name || `Band ${p.band}`} — ₦{p.pricePerKwh}/kWh</option>
                       ))}
                     </select>
                   </div>

@@ -148,7 +148,7 @@ export default function InvestorAdminSection({ formatNaira }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      {/* â”€â”€â”€ Top Control Bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ─── Top Control Bar ────────────────────────────────────────── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
         <div>
           <h2 style={{ fontSize: '1.4rem', fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -164,7 +164,7 @@ export default function InvestorAdminSection({ formatNaira }) {
         </button>
       </div>
 
-      {/* â”€â”€â”€ High-Level Financial Metrics Grid â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ─── High-Level Financial Metrics Grid ──────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '16px' }}>
         {/* Card 1: Total Capital */}
         <div className="glass-panel" style={{ padding: '18px' }}>
@@ -245,7 +245,7 @@ export default function InvestorAdminSection({ formatNaira }) {
         </div>
       </div>
 
-      {/* â”€â”€â”€ Detailed Investor Portfolio Table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ─── Detailed Investor Portfolio Table ───────────────────────── */}
       <div className="glass-panel" style={{ padding: '20px' }}>
         <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#fff', marginBottom: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span>Investor Portfolios, Monthly Earnings & Payout Schedules</span>
@@ -285,7 +285,7 @@ export default function InvestorAdminSection({ formatNaira }) {
                       <td style={{ padding: '12px 14px', fontWeight: 600, color: '#fff' }}>
                         {g.name}
                         {g.meterCount > 0 ? (
-                          <span style={{ fontSize: '0.72rem', color: '#10b981', display: 'block' }}>âš¡ {g.meterCount} Meters</span>
+                          <span style={{ fontSize: '0.72rem', color: '#10b981', display: 'block' }}>⚡ {g.meterCount} Meters</span>
                         ) : (
                           <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'block' }}>No meters yet</span>
                         )}
@@ -458,7 +458,7 @@ export default function InvestorAdminSection({ formatNaira }) {
         )}
       </div>
 
-      {/* â”€â”€â”€ Payout / Settlement Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ─── Payout / Settlement Modal ───────────────────────────────── */}
       {selectedGroup && (
         <div style={{
           position: 'fixed',
@@ -530,7 +530,7 @@ export default function InvestorAdminSection({ formatNaira }) {
             <form onSubmit={handleRecordPayout} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '6px', fontWeight: 600 }}>
-                  Payout Amount (â‚¦) <span style={{ color: '#fbbf24' }}>(Auto-filled to exact balance)</span>
+                  Payout Amount (₦) <span style={{ color: '#fbbf24' }}>(Auto-filled to exact balance)</span>
                 </label>
                 <input
                   type="number"
