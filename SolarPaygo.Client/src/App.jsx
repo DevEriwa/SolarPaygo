@@ -1,5 +1,5 @@
 import ScrollToTop from './components/ScrollToTop';
-﻿import { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, NavLink, Navigate } from 'react-router-dom';
 import { Sun, LayoutDashboard, CreditCard, Settings, LogOut } from 'lucide-react';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
@@ -46,6 +46,29 @@ function AppContent() {
   const [ghostTarget, setGhostTarget] = useState(() => sessionStorage.getItem('impersonated_target'));
   const [ghostRole, setGhostRole] = useState(() => sessionStorage.getItem('impersonated_role'));
   const isImpersonating = !!sessionStorage.getItem('superadmin_master_token');
+  // --- Auto-refresh: detect new deployments and reload automatically ---
+  useEffect(() => {
+    let knownBuildTime = null;
+    const checkVersion = async () => {
+      try {
+        const res = await fetch(`/version.json?t=${Date.now()}`, { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (knownBuildTime === null) {
+          knownBuildTime = data.buildTime; // first load - record current version
+        } else if (data.buildTime !== knownBuildTime) {
+          console.log('[AutoRefresh] New deployment detected, reloading...');
+          window.location.reload();
+        }
+      } catch { /* silently ignore network errors */ }
+    };
+    checkVersion();
+    const intervalId = setInterval(checkVersion, 45000);
+    const onFocus = () => checkVersion();
+    window.addEventListener('visibilitychange', onFocus);
+    return () => { clearInterval(intervalId); window.removeEventListener('visibilitychange', onFocus); };
+  }, []);
+  // --- End auto-refresh ---
 
   const handleStartImpersonate = (impersonatedToken, targetRole, targetName) => {
     const currentMaster = localStorage.getItem('token');

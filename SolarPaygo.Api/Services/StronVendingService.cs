@@ -38,40 +38,9 @@ namespace SolarPaygo.Api.Services
             {
                 _logger.LogInformation("[Stron] Generating token for Meter ID: {MeterId}, amount/unit: {Amount}", meterId, amount);
 
-                // 1. Try remote vending first (VendingMeterRemotely)
-                var remotePayload = new
-                {
-                    CompanyName = config.Company,
-                    UserName = config.User,
-                    PassWord = config.Pass,
-                    MeterID = meterId,
-                    is_vend_by_unit = isVendByUnit ? "true" : "false",
-                    Amount = amount.ToString("F2")
-                };
-
-                try
-                {
-                    var response = await _httpClient.PostAsJsonAsync($"{config.BaseUrl.TrimEnd('/')}/api/VendingMeterRemotely", remotePayload);
-                    if (response.IsSuccessStatusCode)
-                    {
-                        var raw = await response.Content.ReadAsStringAsync();
-                        _logger.LogInformation("[Stron] Remote vending raw response: {Raw}", raw);
-                        var parsed = TryParseVendingResponse(raw);
-                        if (parsed != null) return parsed;
-                    }
-                    else
-                    {
-                        var err = await response.Content.ReadAsStringAsync();
-                        _logger.LogWarning("[Stron] VendingMeterRemotely failed (Status={Status}): {Error}. Falling back to standard VendingMeter.", response.StatusCode, err);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "[Stron] VendingMeterRemotely exception. Falling back to standard VendingMeter for meter {MeterId}.", meterId);
-                }
-
-                // 2. Fallback to standard VendingMeter (generates STS token reliably even if meter cellular is offline)
-                _logger.LogInformation("[Stron] Calling standard /api/VendingMeter for meter {MeterId}...", meterId);
+                // Standard /api/VendingMeter generates the official 20-digit STS token instantaneously (0.2s)
+                // without waiting for the physical cellular meter to connect. Over-the-air push is handled
+                // by SendTokenRemotelyAsync with a safe timeout.
                 var standardPayload = new
                 {
                     CompanyName = config.Company,
@@ -82,7 +51,8 @@ namespace SolarPaygo.Api.Services
                     Amount = amount.ToString("F2")
                 };
 
-                var stdResponse = await _httpClient.PostAsJsonAsync($"{config.BaseUrl.TrimEnd('/')}/api/VendingMeter", standardPayload);
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                var stdResponse = await _httpClient.PostAsJsonAsync($"{config.BaseUrl.TrimEnd('/')}/api/VendingMeter", standardPayload, cts.Token);
                 if (stdResponse.IsSuccessStatusCode)
                 {
                     var stdRaw = await stdResponse.Content.ReadAsStringAsync();
@@ -93,7 +63,7 @@ namespace SolarPaygo.Api.Services
                 else
                 {
                     var stdErr = await stdResponse.Content.ReadAsStringAsync();
-                    _logger.LogError("[Stron] Both VendingMeterRemotely and standard VendingMeter failed. Status={Status}, Error={Error}", stdResponse.StatusCode, stdErr);
+                    _logger.LogError("[Stron] Standard VendingMeter failed. Status={Status}, Error={Error}", stdResponse.StatusCode, stdErr);
                 }
             }
             catch (Exception ex)
@@ -395,13 +365,19 @@ namespace SolarPaygo.Api.Services
                     Token = token.Replace("-", "").Replace(" ", "")
                 };
 
-                var response = await _httpClient.PostAsJsonAsync($"{config.BaseUrl.TrimEnd('/')}/api/VendingMeterSendToken", payload);
+                // Add a 5-second timeout so it never hangs the HTTP request if the meter is offline
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                var response = await _httpClient.PostAsJsonAsync($"{config.BaseUrl.TrimEnd('/')}/api/VendingMeterSendToken", payload, cts.Token);
                 if (response.IsSuccessStatusCode)
                 {
                     var result = await response.Content.ReadAsStringAsync();
                     _logger.LogInformation("[Stron] Send token remotely response: {Result}", result);
                     return true;
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("[Stron] Send token remotely timed out (5s) for meter {MeterId}. Meter is offline; token is saved and available for keypad entry.", meterId);
             }
             catch (Exception ex)
             {
