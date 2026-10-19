@@ -156,6 +156,7 @@ namespace SolarPaygo.Api.Controllers
             return BadRequest(new { success = false, message = result.Message });
         }
 
+        [NonAction]
         public async Task<object> SyncSquadTransactionsInternalAsync()
         {
             _logger.LogInformation("[SquadSync] Syncing Squad merchant virtual account transactions...");
