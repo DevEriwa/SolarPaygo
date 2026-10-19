@@ -518,8 +518,13 @@ namespace SolarPaygo.Api.Controllers
                 }
                 else
                 {
-                    string errMsg = squadAccount?.ErrorMessage ?? "Failed to generate a virtual account with Squad. Please verify customer details and try again.";
-                    return BadRequest(errMsg);
+                    _logger.LogWarning("[Register] Squad Live Virtual Account generation failed ({Error}). Continuing onboarding with pending virtual account so customer is not blocked.", squadAccount?.ErrorMessage);
+                    squadAccount = new SquadVirtualAccountResponse
+                    {
+                        VirtualAccountNumber = string.Empty,
+                        BankName = "Pending Verification",
+                        ErrorMessage = squadAccount?.ErrorMessage
+                    };
                 }
             }
 
@@ -553,6 +558,59 @@ namespace SolarPaygo.Api.Controllers
             await _context.SaveChangesAsync();
 
             return Ok(newSystem);
+        }
+
+        [Authorize(Roles = "Admin,SuperAdmin")]
+        [HttpPost("systems/{id}/retry-virtual-account")]
+        public async Task<IActionResult> RetryVirtualAccount(int id, [FromBody] RetryVirtualAccountRequest? req)
+        {
+            var system = await _context.SolarSystems.FindAsync(id);
+            if (system == null) return NotFound("System not found.");
+
+            if (req != null)
+            {
+                if (!string.IsNullOrWhiteSpace(req.CustomerBvn)) system.CustomerBvn = req.CustomerBvn.Trim();
+                if (!string.IsNullOrWhiteSpace(req.CustomerDob)) system.CustomerDob = req.CustomerDob.Trim();
+                if (!string.IsNullOrWhiteSpace(req.CustomerPhone)) system.CustomerPhone = req.CustomerPhone.Trim();
+                if (!string.IsNullOrWhiteSpace(req.OwnerName)) system.OwnerName = req.OwnerName.Trim();
+            }
+
+            string formattedDob = system.CustomerDob ?? "01/01/1990";
+            if (formattedDob.Contains('-'))
+            {
+                var parts = formattedDob.Split('-');
+                if (parts.Length == 3) formattedDob = $"{parts[1]}/{parts[2]}/{parts[0]}";
+            }
+
+            var squadAccount = await _squadService.CreateVirtualAccountAsync(
+                system.HardwareId,
+                GetFirstName(system.OwnerName),
+                GetLastName(system.OwnerName),
+                system.CustomerEmail,
+                system.CustomerPhone,
+                system.CustomerBvn,
+                formattedDob,
+                "Nigeria",
+                system.CustomerGender
+            );
+
+            if (squadAccount != null && string.IsNullOrEmpty(squadAccount.ErrorMessage) && !string.IsNullOrWhiteSpace(squadAccount.VirtualAccountNumber))
+            {
+                system.VirtualAccountNumber = squadAccount.VirtualAccountNumber;
+                system.VirtualBankName = squadAccount.BankName;
+                await _context.SaveChangesAsync();
+                return Ok(new { success = true, virtualAccountNumber = system.VirtualAccountNumber, bankName = system.VirtualBankName, message = "Virtual account generated successfully." });
+            }
+
+            return BadRequest(squadAccount?.ErrorMessage ?? "Failed to generate virtual account with Squad. Please check BVN and date of birth.");
+        }
+
+        public class RetryVirtualAccountRequest
+        {
+            public string? CustomerBvn { get; set; }
+            public string? CustomerDob { get; set; }
+            public string? CustomerPhone { get; set; }
+            public string? OwnerName { get; set; }
         }
 
         [Authorize(Roles = "Admin")]
