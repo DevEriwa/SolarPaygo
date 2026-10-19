@@ -8,6 +8,9 @@ namespace SolarPaygo.Api.Services
         Task<StronVendingResponse?> GenerateVendingTokenAsync(string meterId, decimal amount, bool isVendByUnit);
         Task<StronMeterStatusResponse?> QueryMeterStatusAsync(string meterId, DateTime date);
         Task<bool> SetRemoteSwitchAsync(string meterId, bool turnOn);
+        Task<string?> GenerateClearTamperTokenAsync(string meterId);
+        Task<string?> GenerateClearCreditTokenAsync(string meterId);
+        Task<bool> SendTokenRemotelyAsync(string meterId, string token);
     }
 
     public class StronVendingResponse

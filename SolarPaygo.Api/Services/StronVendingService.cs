@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Configuration;
+﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
@@ -38,95 +38,92 @@ namespace SolarPaygo.Api.Services
             {
                 _logger.LogInformation("[Stron] Generating token for Meter ID: {MeterId}, amount/unit: {Amount}", meterId, amount);
 
-                var payload = new
+                // Standard /api/VendingMeter generates the official 20-digit STS token instantaneously (0.2s)
+                // without waiting for the physical cellular meter to connect. Over-the-air push is handled
+                // by SendTokenRemotelyAsync with a safe timeout.
+                var standardPayload = new
                 {
                     CompanyName = config.Company,
                     UserName = config.User,
                     PassWord = config.Pass,
                     MeterID = meterId,
-                    is_vend_by_unit = isVendByUnit ? "true" : "false",
+                    is_vend_by_unit = isVendByUnit ? "1" : "0",
                     Amount = amount.ToString("F2")
                 };
 
-                var response = await _httpClient.PostAsJsonAsync($"{config.BaseUrl.TrimEnd('/')}/api/VendingMeterRemotely", payload);
-
-                if (response.IsSuccessStatusCode)
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                var stdResponse = await _httpClient.PostAsJsonAsync($"{config.BaseUrl.TrimEnd('/')}/api/VendingMeter", standardPayload, cts.Token);
+                if (stdResponse.IsSuccessStatusCode)
                 {
-                    var raw = await response.Content.ReadAsStringAsync();
-                    _logger.LogInformation("[Stron] Raw response: {Raw}", raw);
-                    
-                    using var doc = JsonDocument.Parse(raw);
-                    JsonElement root = doc.RootElement;
-                    JsonElement targetElement = root;
-
-                    if (root.ValueKind == JsonValueKind.Array)
-                    {
-                        if (root.GetArrayLength() > 0)
-                        {
-                            targetElement = root[0];
-                        }
-                        else
-                        {
-                            _logger.LogWarning("[Stron] Empty array returned.");
-                            return null;
-                        }
-                    }
-
-                    string token = "";
-                    if (targetElement.TryGetProperty("Token", out var tokenProp))
-                        token = tokenProp.GetString() ?? "";
-                    else if (targetElement.TryGetProperty("token", out var tokenProp2))
-                        token = tokenProp2.GetString() ?? "";
-
-                    string unit = "";
-                    if (targetElement.TryGetProperty("Total_unit", out var unitProp))
-                        unit = unitProp.GetString() ?? "";
-                    else if (targetElement.TryGetProperty("total_unit", out var unitProp2))
-                        unit = unitProp2.GetString() ?? "";
-                    else if (targetElement.TryGetProperty("Unit", out var unitProp3))
-                        unit = unitProp3.GetString() ?? "";
-
-                    string price = "";
-                    if (targetElement.TryGetProperty("Price", out var priceProp))
-                        price = priceProp.GetString() ?? "";
-                    else if (targetElement.TryGetProperty("price", out var priceProp2))
-                        price = priceProp2.GetString() ?? "";
-
-                    if (!string.IsNullOrEmpty(token))
-                    {
-                        _logger.LogInformation("[Stron] Successfully parsed token: {Token} ({Unit} units)", token, unit);
-                        decimal.TryParse(unit, out var unitDecimal);
-                        decimal.TryParse(price, out var priceDecimal);
-
-                        return new StronVendingResponse
-                        {
-                            Token = FormatToken(token),
-                            Units = unitDecimal,
-                            Price = priceDecimal
-                        };
-                    }
-                    _logger.LogWarning("[Stron] Vending returned success status but token was missing or empty.");
+                    var stdRaw = await stdResponse.Content.ReadAsStringAsync();
+                    _logger.LogInformation("[Stron] Standard VendingMeter raw response: {Raw}", stdRaw);
+                    var stdParsed = TryParseVendingResponse(stdRaw);
+                    if (stdParsed != null) return stdParsed;
                 }
                 else
                 {
-                    var err = await response.Content.ReadAsStringAsync();
-                    _logger.LogWarning("[Stron] Vending failed: Status={Status}, Error={Error}", response.StatusCode, err);
+                    var stdErr = await stdResponse.Content.ReadAsStringAsync();
+                    _logger.LogError("[Stron] Standard VendingMeter failed. Status={Status}, Error={Error}", stdResponse.StatusCode, stdErr);
                 }
-            }
-            catch (HttpRequestException ex)
-            {
-                _logger.LogError(ex, "[Stron] Network error contacting Stron API for meter {MeterId}. The meter server may be offline.", meterId);
-            }
-            catch (TaskCanceledException ex)
-            {
-                _logger.LogError(ex, "[Stron] Request to Stron API timed out for meter {MeterId}.", meterId);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "[Stron] Unexpected error during vending for meter {MeterId}.", meterId);
+                _logger.LogError(ex, "[Stron] Unexpected error during token generation for meter {MeterId}.", meterId);
             }
 
-            // Return null — no mock fallback. Caller must handle null as a hard failure and reject the transaction.
+            return null;
+        }
+
+        private StronVendingResponse? TryParseVendingResponse(string raw)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(raw);
+                JsonElement root = doc.RootElement;
+                JsonElement targetElement = root;
+
+                if (root.ValueKind == JsonValueKind.Array)
+                {
+                    if (root.GetArrayLength() > 0)
+                        targetElement = root[0];
+                    else
+                        return null;
+                }
+
+                string token = "";
+                if (targetElement.TryGetProperty("Token", out var tokenProp))
+                    token = tokenProp.GetString() ?? "";
+                else if (targetElement.TryGetProperty("token", out var tokenProp2))
+                    token = tokenProp2.GetString() ?? "";
+
+                string unit = "";
+                if (targetElement.TryGetProperty("Total_unit", out var unitProp))
+                    unit = unitProp.GetString() ?? "";
+                else if (targetElement.TryGetProperty("total_unit", out var unitProp2))
+                    unit = unitProp2.GetString() ?? "";
+                else if (targetElement.TryGetProperty("Unit", out var unitProp3))
+                    unit = unitProp3.GetString() ?? "";
+
+                string price = "";
+                if (targetElement.TryGetProperty("Price", out var priceProp))
+                    price = priceProp.GetString() ?? "";
+                else if (targetElement.TryGetProperty("price", out var priceProp2))
+                    price = priceProp2.GetString() ?? "";
+
+                if (!string.IsNullOrEmpty(token))
+                {
+                    decimal.TryParse(unit, out var unitDecimal);
+                    decimal.TryParse(price, out var priceDecimal);
+
+                    return new StronVendingResponse
+                    {
+                        Token = FormatToken(token),
+                        Units = unitDecimal,
+                        Price = priceDecimal
+                    };
+                }
+            }
+            catch { }
             return null;
         }
 
@@ -140,48 +137,89 @@ namespace SolarPaygo.Api.Services
                     CompanyName = config.Company,
                     UserName = config.User,
                     PassWord = config.Pass,
-                    MeterId = meterId,
-                    Date = date.ToString("yyyy-MM-dd")
+                    MeterId = meterId
                 };
 
-                var response = await _httpClient.PostAsJsonAsync($"{config.BaseUrl.TrimEnd('/')}/api/QueryDailySinglePhaseMeter", payload);
+                var response = await _httpClient.PostAsJsonAsync($"{config.BaseUrl.TrimEnd('/')}/api/RemotelyRead", payload);
                 var rawResult = await response.Content.ReadAsStringAsync();
 
                 if (response.IsSuccessStatusCode)
                 {
-                    try
+                    var lines = JsonSerializer.Deserialize<List<string>>(rawResult, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    if (lines != null && lines.Count > 0)
                     {
-                        var results = JsonSerializer.Deserialize<List<SinglePhaseDaliyInformationViewModel>>(rawResult, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                        if (results != null && results.Count > 0)
-                        {
-                            var res = results[0];
-                            decimal.TryParse(res.Residual_Amount, out var residual);
-                            decimal.TryParse(res.Cumulative_Total_Consumption, out var cumulative);
-                            decimal.TryParse(res.Voltage, out var voltage);
-                            decimal.TryParse(res.Current, out var current);
-                            decimal.TryParse(res.Power, out var power);
+                        bool isSuccess = false;
+                        decimal voltage = 0;
+                        decimal current = 0;
+                        decimal power = 0;
+                        decimal residual = 0;
+                        decimal cumulative = 0;
+                        string relayState = "1";
+                        string coverState = "0";
 
+                        foreach (var line in lines)
+                        {
+                            if (string.IsNullOrWhiteSpace(line)) continue;
+                            var parts = line.Split(':', 2);
+                            if (parts.Length < 2) continue;
+
+                            string key = parts[0].Trim().ToLower();
+                            string val = parts[1].Trim();
+
+                            if (key == "readdata")
+                            {
+                                isSuccess = val.ToLower().Contains("successfully");
+                            }
+                            else if (key == "voltage")
+                            {
+                                voltage = ParseDecimalValue(val);
+                            }
+                            else if (key == "current")
+                            {
+                                current = ParseDecimalValue(val);
+                            }
+                            else if (key == "power")
+                            {
+                                // Power is returned in kW, convert to Watts (kW * 1000)
+                                power = ParseDecimalValue(val) * 1000m;
+                            }
+                            else if (key == "residual_amount")
+                            {
+                                residual = ParseDecimalValue(val);
+                            }
+                            else if (key == "cumulative_total_kwh_consumption" || key == "cumulative_total_kwh_consumption ")
+                            {
+                                cumulative = ParseDecimalValue(val);
+                            }
+                            else if (key == "relay_state")
+                            {
+                                relayState = val.ToLower().Contains("open") || val.ToLower().Contains("off") || val == "0" ? "0" : "1";
+                            }
+                            else if (key == "cover_state")
+                            {
+                                coverState = val.ToLower().Contains("normal") ? "0" : "1";
+                            }
+                        }
+
+                        if (isSuccess)
+                        {
                             return new StronMeterStatusResponse
                             {
-                                MeterId = res.MeterID,
+                                MeterId = meterId,
                                 ResidualAmount = residual,
                                 CumulativeConsumption = cumulative,
                                 Voltage = voltage,
                                 Current = current,
                                 Power = power,
-                                RelayState = res.RelayState,
-                                CoverState = res.CoverState
+                                RelayState = relayState,
+                                CoverState = coverState
                             };
                         }
-                    }
-                    catch (Exception jsonEx)
-                    {
-                        _logger.LogWarning("[Stron] Failed to parse meter status JSON. Raw: {Raw}. Error: {Error}", rawResult, jsonEx.Message);
                     }
                 }
                 else
                 {
-                    _logger.LogWarning("[Stron] Meter status query failed: Status={Status}, Raw: {Raw}", response.StatusCode, rawResult);
+                    _logger.LogWarning("[Stron] RemotelyRead query failed: Status={Status}, Raw: {Raw}", response.StatusCode, rawResult);
                 }
             }
             catch (HttpRequestException ex)
@@ -197,7 +235,6 @@ namespace SolarPaygo.Api.Services
                 _logger.LogWarning("[Stron] Unexpected error querying meter {MeterId}: {Message}", meterId, ex.Message);
             }
 
-            // Return null — billing sync will skip this system gracefully if the meter is unreachable.
             return null;
         }
 
@@ -241,8 +278,123 @@ namespace SolarPaygo.Api.Services
                 _logger.LogError(ex, "[Stron] Unexpected error during remote switch for meter {MeterId}.", meterId);
             }
 
-            // Return false — the caller knows the hardware command did not execute.
             return false;
+        }
+
+        public async Task<string?> GenerateClearTamperTokenAsync(string meterId)
+        {
+            var config = GetConfig();
+            try
+            {
+                var payload = new
+                {
+                    CompanyName = config.Company,
+                    UserName = config.User,
+                    PassWord = config.Pass,
+                    METER_ID = meterId
+                };
+
+                var response = await _httpClient.PostAsJsonAsync($"{config.BaseUrl.TrimEnd('/')}/api/ClearTamperDirectly", payload);
+                if (response.IsSuccessStatusCode)
+                {
+                    var resultStr = await response.Content.ReadAsStringAsync();
+                    if (!string.IsNullOrWhiteSpace(resultStr))
+                    {
+                        string clean = resultStr.Trim('"', ' ');
+                        var parts = clean.Split(',');
+                        if (parts.Length > 0)
+                        {
+                            return FormatToken(parts[0]);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Stron] Error generating clear tamper token for meter {MeterId}.", meterId);
+            }
+            return null;
+        }
+
+        public async Task<string?> GenerateClearCreditTokenAsync(string meterId)
+        {
+            var config = GetConfig();
+            try
+            {
+                var payload = new
+                {
+                    CompanyName = config.Company,
+                    UserName = config.User,
+                    PassWord = config.Pass,
+                    METER_ID = meterId
+                };
+
+                var response = await _httpClient.PostAsJsonAsync($"{config.BaseUrl.TrimEnd('/')}/api/ClearCreditDirectly", payload);
+                if (response.IsSuccessStatusCode)
+                {
+                    var resultStr = await response.Content.ReadAsStringAsync();
+                    if (!string.IsNullOrWhiteSpace(resultStr))
+                    {
+                        string clean = resultStr.Trim('"', ' ');
+                        var parts = clean.Split(',');
+                        if (parts.Length > 0)
+                        {
+                            return FormatToken(parts[0]);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Stron] Error generating clear credit token for meter {MeterId}.", meterId);
+            }
+            return null;
+        }
+
+        public async Task<bool> SendTokenRemotelyAsync(string meterId, string token)
+        {
+            var config = GetConfig();
+            try
+            {
+                var payload = new
+                {
+                    CompanyName = config.Company,
+                    UserName = config.User,
+                    PassWord = config.Pass,
+                    MeterID = meterId,
+                    Token = token.Replace("-", "").Replace(" ", "")
+                };
+
+                // Add a 5-second timeout so it never hangs the HTTP request if the meter is offline
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                var response = await _httpClient.PostAsJsonAsync($"{config.BaseUrl.TrimEnd('/')}/api/VendingMeterSendToken", payload, cts.Token);
+                if (response.IsSuccessStatusCode)
+                {
+                    var result = await response.Content.ReadAsStringAsync();
+                    _logger.LogInformation("[Stron] Send token remotely response: {Result}", result);
+                    return true;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("[Stron] Send token remotely timed out (5s) for meter {MeterId}. Meter is offline; token is saved and available for keypad entry.", meterId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Stron] Error sending token remotely to meter {MeterId}.", meterId);
+            }
+            return false;
+        }
+
+        private decimal ParseDecimalValue(string valueStr)
+        {
+            if (string.IsNullOrWhiteSpace(valueStr)) return 0;
+            var parts = valueStr.Trim().Split(' ');
+            if (parts.Length > 0 && decimal.TryParse(parts[0], out var val))
+            {
+                return val;
+            }
+            return 0;
         }
 
         private string FormatToken(string token)

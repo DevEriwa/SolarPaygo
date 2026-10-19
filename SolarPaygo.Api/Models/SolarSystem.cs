@@ -26,6 +26,12 @@ namespace SolarPaygo.Api.Models
         public DateTime? LastSyncTime { get; set; }
         public decimal LastSyncKwh { get; set; }
 
+        // Pending Wallet: naira paid but not yet converted into a vended token (either below
+        // the per-customer minimum threshold, or a leftover remainder after a conversion).
+        // Entirely separate from PrepaidNairaBalance, which continues to feed the daily
+        // hybrid-billing/relay-lock subsystem untouched.
+        public decimal PendingWalletBalance { get; set; } = 0.0M;
+
         // Daily Watermark Billing & Overload Fields
         public int MaxLoadWatts { get; set; } = 400; // Configurable max load threshold
         public DateTime? LastBillingDate { get; set; }
@@ -43,5 +49,25 @@ namespace SolarPaygo.Api.Models
         // New properties for unit history and generator capacity tracking
         public decimal CumulativeKwhBought { get; set; } = 0.0M;
         public string GeneratorCapacity { get; set; } = "2KV";
+
+        // Assigned Price Plan (Band). Null means legacy hardcoded pricing — preserves
+        // existing billing behavior for any customer not explicitly assigned a band.
+        public int? PricePlanId { get; set; }
+        public PricePlan? PricePlan { get; set; }
+
+        // True once a low-balance alert email has been sent for the CURRENT low-balance
+        // episode. Reset to false once the balance recovers, so the next dip sends a fresh
+        // alert instead of staying silent forever or re-sending every poll cycle.
+        // Tracks if the system was tripped by power overload
+        public bool IsOverloaded { get; set; } = false;
+
+        // Custom customer login password (optional; falls back to HardwareId if null/empty)
+        public string? CustomerPassword { get; set; }
+
+        public bool LowBalanceNotified { get; set; } = false;
+
+        // Assigned Device Group/Tab. Null means Ungrouped / default view.
+        public int? DeviceGroupId { get; set; }
+        public DeviceGroup? DeviceGroup { get; set; }
     }
 }

@@ -9,6 +9,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Security.Claims;
+using System.IdentityModel.Tokens.Jwt;
 
 namespace SolarPaygo.Api.Controllers
 {
@@ -37,20 +39,12 @@ namespace SolarPaygo.Api.Controllers
             _configuration = configuration;
         }
 
-        // 1. Fetch Systems (and sync live metrics + apply hybrid billing in the process)
+        // 1. Fetch Systems (fast DB query)
         [Authorize(Roles = "Admin")]
         [HttpGet("systems")]
         public async Task<IActionResult> GetDashboardSummary()
         {
-            var systems = await _context.SolarSystems.ToListAsync();
-            
-            // Sync each system sequentially because DbContext is not thread-safe for parallel operations
-            foreach (var sys in systems)
-            {
-                await SyncSystemAndApplyBilling(sys);
-            }
-            
-            await _context.SaveChangesAsync();
+            var systems = await _context.SolarSystems.Include(s => s.PricePlan).Include(s => s.DeviceGroup).ToListAsync();
 
             // Calculate today's revenue
             var today = DateTime.UtcNow.Date;
@@ -75,21 +69,89 @@ namespace SolarPaygo.Api.Controllers
                 })
                 .ToListAsync();
 
+            // Build enriched system list with cached meter connectivity flag
+            // A meter is considered "Online" if its last sync time was within the last 15 minutes
+            var enrichedSystems = systems.Select(s => new {
+                s.Id, s.HardwareId, s.Status, s.AvailableUnits, s.OwnerName, s.StronMeterId,
+                s.VirtualAccountNumber, s.VirtualBankName, s.CustomerEmail, s.CustomerPhone,
+                s.CustomerBvn, s.CustomerDob, s.CustomerGender,
+                s.PrepaidNairaBalance, s.PendingWalletBalance, s.CumulativeKwhConsumed, s.CumulativeKwhBought,
+                s.LastSyncTime, s.LastSyncKwh, s.MaxLoadWatts,
+                s.DailyKwhConsumed, s.DailyTimeActiveHours, s.DailyAmountCharged,
+                s.Voltage, s.Current, s.Power, s.RelayState, s.CoverState, s.IsOverloaded,
+                s.GeneratorCapacity,
+                s.PricePlanId,
+                PricePlan = s.PricePlan == null ? null : new {
+                    s.PricePlan.Id, s.PricePlan.Band, s.PricePlan.Name, s.PricePlan.PricePerKwh,
+                    s.PricePlan.LoyaltyDiscountEnabled, s.PricePlan.LoyaltyThresholdKwh, s.PricePlan.LoyaltyDiscountPercent,
+                    s.PricePlan.TimeFloorProtectionEnabled, s.PricePlan.TimeFloorRatePerHour, s.PricePlan.TimeFloorMinimumKwh
+                },
+                s.DeviceGroupId,
+                DeviceGroup = s.DeviceGroup == null ? null : new {
+                    s.DeviceGroup.Id, s.DeviceGroup.Name, s.DeviceGroup.Description, s.DeviceGroup.DisplayOrder, s.DeviceGroup.IsActive
+                },
+                MeterOnline = s.LastSyncTime.HasValue && (DateTime.UtcNow - s.LastSyncTime.Value).TotalMinutes < 15
+            }).ToList();
+
             return Ok(new {
-                Systems = systems,
+                Systems = enrichedSystems,
                 RevenueToday = revenueToday,
                 RecentPayments = recentPayments
             });
         }
 
         // Helper: Syncs live Stron telemetry, applies overload cutoff, and calculates daily hybrid billing
-        private async Task SyncSystemAndApplyBilling(SolarSystem sys)
+        // Returns true if the meter responded (online), false if offline/unreachable
+        private async Task<bool> SyncSystemAndApplyBilling(SolarSystem sys)
         {
-            if (string.IsNullOrWhiteSpace(sys.StronMeterId)) return;
+            if (string.IsNullOrWhiteSpace(sys.StronMeterId)) return false;
 
             // 1. Call Stron live API to get the current meter status
             var status = await _vendingService.QueryMeterStatusAsync(sys.StronMeterId, DateTime.UtcNow);
-            if (status == null) return;
+            if (status == null) return false; // Meter offline — skip sync, return offline
+
+            // Offline Recharge Auto-Delivery: Deliver any pending offline tokens now that meter is online
+            var undeliveredTokens = await _context.Transactions
+                .Where(t => t.SolarSystemId == sys.Id && !t.IsDeliveredToMeter && !string.IsNullOrEmpty(t.StsToken))
+                .OrderBy(t => t.TransactionDate)
+                .ToListAsync();
+
+            if (undeliveredTokens.Count > 0)
+            {
+                _logger.LogInformation("[SyncSystemAndApplyBilling] Meter {MeterId} is online! Delivering {Count} pending offline tokens...", sys.StronMeterId, undeliveredTokens.Count);
+                bool anyDelivered = false;
+                foreach (var pendingTx in undeliveredTokens)
+                {
+                    bool sent = await _vendingService.SendTokenRemotelyAsync(sys.StronMeterId, pendingTx.StsToken!);
+                    if (sent)
+                    {
+                        pendingTx.IsDeliveredToMeter = true;
+                        anyDelivered = true;
+                        _logger.LogInformation("[SyncSystemAndApplyBilling] Successfully delivered offline token {Token} to meter {MeterId}!", pendingTx.StsToken, sys.StronMeterId);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("[SyncSystemAndApplyBilling] Could not deliver token {Token} to meter {MeterId}. Will retry.", pendingTx.StsToken, sys.StronMeterId);
+                    }
+                }
+
+                if (anyDelivered)
+                {
+                    sys.Status = "Active";
+                    sys.RelayState = "1";
+                    await _vendingService.SetRemoteSwitchAsync(sys.StronMeterId, turnOn: true);
+
+                    try
+                    {
+                        var refreshed = await _vendingService.QueryMeterStatusAsync(sys.StronMeterId, DateTime.UtcNow);
+                        if (refreshed != null) status = refreshed;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "[SyncSystemAndApplyBilling] Error refreshing meter status after token delivery");
+                    }
+                }
+            }
 
             // Update live telemetry data
             sys.Voltage = status.Voltage;
@@ -97,11 +159,15 @@ namespace SolarPaygo.Api.Controllers
             sys.Power = status.Power;
             sys.CoverState = status.CoverState;
 
+            // Trust the meter's own reported remaining balance directly instead of computing it
+            // locally — keeps the displayed "remaining kWh" in sync with the physical meter
+            // (including immediately after a Clear Credit reset).
+            sys.AvailableUnits = status.ResidualAmount;
+
             // Ensure MaxLoadWatts aligns with declared GeneratorCapacity (e.g., 2KV => 2000W)
             if (!string.IsNullOrWhiteSpace(sys.GeneratorCapacity))
             {
-                int capacityKw = ParseCapacityKw(sys.GeneratorCapacity);
-                sys.MaxLoadWatts = capacityKw * 1000;
+                sys.MaxLoadWatts = ResolveMaxLoadWatts(sys.GeneratorCapacity);
             }
 
             // 2. Enforce Maximum Load Limit
@@ -110,8 +176,9 @@ namespace SolarPaygo.Api.Controllers
                 _logger.LogWarning("[Overload] System {Id} exceeded {Max}W. Current Power: {Power}W. Locking system.", sys.Id, sys.MaxLoadWatts, sys.Power);
                 sys.Status = "Locked";
                 sys.RelayState = "0";
+                sys.IsOverloaded = true;
                 await _vendingService.SetRemoteSwitchAsync(sys.StronMeterId, turnOn: false);
-                return; // Stop billing/processing for this cycle since we just cut it off
+                return true; // Meter was reachable — relay cut due to overload
             }
 
             // 3. Perform Billing calculations if it has been synced before
@@ -141,25 +208,14 @@ namespace SolarPaygo.Api.Controllers
                     sys.DailyKwhConsumed += kwhUsed;
                     sys.DailyTimeActiveHours += (decimal)hoursElapsed;
                     sys.CumulativeKwhConsumed += kwhUsed;
+                    // AvailableUnits is now set directly from status.ResidualAmount above.
 
-                    // Deduct actual kWh from available units
-                    sys.AvailableUnits -= kwhUsed;
-                    if (sys.AvailableUnits < 0) sys.AvailableUnits = 0;
+                    // Rate/billing floor resolved via PricingEngine — uses the system's assigned
+                    // price plan if any, otherwise falls back to legacy hardcoded pricing.
+                    decimal rate = PricingEngine.ResolveRate(sys);
+                    decimal targetDailyCharge = PricingEngine.ComputeTargetDailyCharge(sys, rate);
 
-                    // Rate is ₦2,500/kWh base, ₦1,250/kWh (50% discount) if cumulative > 500 kWh
-                    decimal rate = sys.CumulativeKwhConsumed >= 500m ? 1250m : 2500m;
-
-                    // A) Calculate energy charge and time charge so far today
-                    decimal energyCharge = sys.DailyKwhConsumed * rate;
-                    decimal timeCharge = sys.DailyTimeActiveHours * 313m;
-                    
-                    // B) The strict minimum charge for the day if ANY power is used is 0.3 kWh worth
-                    decimal minimumDailyCharge = 0.3m * rate;
-
-                    // C) Target daily charge is the highest of the three scenarios
-                    decimal targetDailyCharge = Math.Max(minimumDailyCharge, Math.Max(energyCharge, timeCharge));
-
-                    // D) Deduct the difference between what they SHOULD pay for today and what they ALREADY paid today
+                    // Deduct the difference between what they SHOULD pay for today and what they ALREADY paid today
                     decimal amountToDeduct = targetDailyCharge - sys.DailyAmountCharged;
 
                     if (amountToDeduct > 0)
@@ -193,18 +249,30 @@ namespace SolarPaygo.Api.Controllers
                 sys.LastSyncKwh = status.CumulativeConsumption;
                 sys.LastBillingDate = now.Date;
             }
+
+            return true; // Meter was reachable
         }
 
         [Authorize(Roles = "Admin")]
         [HttpGet("systems/{id}")]
-        public async Task<IActionResult> GetSystemDetails(int id)
+        public async Task<IActionResult> GetSystemDetails(int id, [FromQuery] bool sync = false)
         {
-            var system = await _context.SolarSystems.FindAsync(id);
+            var system = await _context.SolarSystems.Include(s => s.PricePlan).FirstOrDefaultAsync(s => s.Id == id);
             if (system == null) return NotFound();
 
-            // Sync this specific system before returning details
-            await SyncSystemAndApplyBilling(system);
-            await _context.SaveChangesAsync();
+            // Synchronous hardware IoT sync only if explicitly requested (e.g. ?sync=true)
+            if (sync)
+            {
+                try
+                {
+                    await SyncSystemAndApplyBilling(system);
+                    await _context.SaveChangesAsync();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[GetSystemDetails] Remote IoT sync failed for system {Id}", id);
+                }
+            }
 
             var logs = await _context.UsageLogs
                 .Where(l => l.SolarSystemId == id)
@@ -215,43 +283,125 @@ namespace SolarPaygo.Api.Controllers
             var transactions = await _context.Transactions
                 .Where(t => t.SolarSystemId == id)
                 .OrderByDescending(t => t.TransactionDate)
-                .Take(10)
+                .Take(20)
                 .ToListAsync();
 
-            return Ok(new { System = system, RecentUsage = logs, RecentTransactions = transactions });
+            // Include computed MeterOnline flag (true if last sync within 15 minutes)
+            bool meterOnline = system.LastSyncTime.HasValue && (DateTime.UtcNow - system.LastSyncTime.Value).TotalMinutes < 15;
+
+            return Ok(new {
+                System = new {
+                    system.Id, system.HardwareId, system.Status, system.AvailableUnits, system.OwnerName,
+                    system.StronMeterId, system.VirtualAccountNumber, system.VirtualBankName,
+                    system.CustomerEmail, system.CustomerPhone, system.PrepaidNairaBalance,
+                    system.PendingWalletBalance, system.CumulativeKwhConsumed, system.CumulativeKwhBought,
+                    system.LastSyncTime, system.LastSyncKwh, system.MaxLoadWatts,
+                    system.DailyKwhConsumed, system.DailyTimeActiveHours, system.DailyAmountCharged,
+                    system.Voltage, system.Current, system.Power, system.RelayState, system.CoverState, system.IsOverloaded,
+                    system.GeneratorCapacity, system.PricePlanId, system.DeviceGroupId,
+                    PricePlan = system.PricePlan == null ? null : new {
+                        system.PricePlan.Id, system.PricePlan.Band, system.PricePlan.Name,
+                        system.PricePlan.PricePerKwh,
+                        system.PricePlan.LoyaltyDiscountEnabled,
+                        system.PricePlan.LoyaltyThresholdKwh,
+                        system.PricePlan.LoyaltyDiscountPercent
+                    },
+                    MeterOnline = meterOnline
+                },
+                RecentUsage = logs,
+                RecentTransactions = transactions
+            });
         }
 
-        // New endpoint for Customers to fetch only their system
+        // Fast endpoint for loading customer transaction history instantly from DB without IoT delays
+        [Authorize(Roles = "Admin")]
+        [HttpGet("systems/{id}/transactions")]
+        public async Task<IActionResult> GetSystemTransactions(int id)
+        {
+            var transactions = await _context.Transactions
+                .Where(t => t.SolarSystemId == id)
+                .OrderByDescending(t => t.TransactionDate)
+                .Take(25)
+                .ToListAsync();
+
+            return Ok(transactions);
+        }
+
+        // Endpoint for Customers to fetch their system instantly from DB
         [Authorize(Roles = "Customer")]
         [HttpGet("my-system")]
-        public async Task<IActionResult> GetMySystem()
+        public async Task<IActionResult> GetMySystem([FromQuery] bool sync = false)
         {
             var systemIdClaim = User.Claims.FirstOrDefault(c => c.Type == "SystemId")?.Value;
-            if (string.IsNullOrEmpty(systemIdClaim) || !int.TryParse(systemIdClaim, out int systemId))
+            SolarSystem? system = null;
+
+            if (!string.IsNullOrEmpty(systemIdClaim) && int.TryParse(systemIdClaim, out int systemId))
             {
-                return Unauthorized();
+                system = await _context.SolarSystems.Include(s => s.PricePlan).FirstOrDefaultAsync(s => s.Id == systemId);
+            }
+            else
+            {
+                var sub = User.FindFirst(ClaimTypes.NameIdentifier)?.Value 
+                          ?? User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
+                          ?? User.FindFirst("sub")?.Value;
+                if (!string.IsNullOrEmpty(sub))
+                {
+                    system = await _context.SolarSystems.Include(s => s.PricePlan)
+                        .FirstOrDefaultAsync(s => (s.CustomerEmail != null && s.CustomerEmail.ToLower() == sub.ToLower()) || s.HardwareId.ToLower() == sub.ToLower());
+                }
             }
 
-            var system = await _context.SolarSystems.FindAsync(systemId);
-            if (system == null) return NotFound();
+            if (system == null) return NotFound("Customer system not found");
 
-            // Sync this specific system
-            await SyncSystemAndApplyBilling(system);
-            await _context.SaveChangesAsync();
+            // Routine loads and polling read instantly from the database without blocking on remote cellular IoT.
+            // Only perform synchronous hardware sync if explicitly requested (e.g. ?sync=true)
+            if (sync)
+            {
+                try
+                {
+                    await SyncSystemAndApplyBilling(system);
+                    await _context.SaveChangesAsync();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[MySystem] Synchronous hardware sync failed for system {Id}", system.Id);
+                }
+            }
 
             var logs = await _context.UsageLogs
-                .Where(l => l.SolarSystemId == systemId)
+                .Where(l => l.SolarSystemId == system.Id)
                 .OrderByDescending(l => l.Timestamp)
                 .Take(20)
                 .ToListAsync();
 
             var transactions = await _context.Transactions
-                .Where(t => t.SolarSystemId == systemId)
+                .Where(t => t.SolarSystemId == system.Id)
                 .OrderByDescending(t => t.TransactionDate)
                 .Take(10)
                 .ToListAsync();
 
-            return Ok(new { System = system, RecentUsage = logs, RecentTransactions = transactions });
+            // Include computed MeterOnline flag (true if last sync within 15 minutes)
+            bool meterOnline = system.LastSyncTime.HasValue && (DateTime.UtcNow - system.LastSyncTime.Value).TotalMinutes < 15;
+
+            return Ok(new {
+                System = new {
+                    system.Id, system.HardwareId, system.Status, system.AvailableUnits, system.OwnerName,
+                    system.StronMeterId, system.VirtualAccountNumber, system.VirtualBankName,
+                    system.CustomerEmail, system.CustomerPhone, system.PrepaidNairaBalance,
+                    system.PendingWalletBalance, system.CumulativeKwhConsumed, system.CumulativeKwhBought,
+                    system.LastSyncTime, system.LastSyncKwh, system.MaxLoadWatts,
+                    system.DailyKwhConsumed, system.DailyTimeActiveHours, system.DailyAmountCharged,
+                    system.Voltage, system.Current, system.Power, system.RelayState, system.CoverState, system.IsOverloaded,
+                    system.GeneratorCapacity, system.PricePlanId, system.DeviceGroupId,
+                    PricePlan = system.PricePlan == null ? null : new {
+                        system.PricePlan.Id, system.PricePlan.Band, system.PricePlan.Name,
+                        system.PricePlan.PricePerKwh
+                    },
+                    MeterOnline = meterOnline
+                },
+                RecentUsage = logs,
+                RecentTransactions = transactions
+            });
         }
 
         public class RegisterSystemRequest
@@ -266,6 +416,8 @@ namespace SolarPaygo.Api.Controllers
             public string CustomerAddress { get; set; } = "Lagos, Nigeria";
             public string CustomerGender { get; set; } = ""; // Gender will be selected by user/admin
             public string GeneratorCapacity { get; set; } = "2KV"; // e.g. 1KV, 2KV, 3KV, 5KV, 10KV
+            public int? PricePlanId { get; set; } // optional — null means legacy/standard pricing
+            public int? DeviceGroupId { get; set; } // optional — null means Ungrouped
 
             // Support snake_case/Squad-style names if sent directly
             public string? customer_identifier { get; set; }
@@ -330,22 +482,32 @@ namespace SolarPaygo.Api.Controllers
             if (existing != null)
                 return Ok(existing);
 
+            if (request.PricePlanId.HasValue)
+            {
+                bool planExists = await _context.PricePlans.AnyAsync(p => p.Id == request.PricePlanId.Value);
+                if (!planExists)
+                    return BadRequest("Price plan not found.");
+            }
+
             // Generate dedicated Squad Virtual Account for bank transfer payments
             _logger.LogInformation("[Register] Registering customer and generating Squad virtual account for {OwnerName}", request.OwnerName);
             
+            string reqFirstName = !string.IsNullOrWhiteSpace(request.first_name) ? request.first_name.Trim() : GetFirstName(request.OwnerName);
+            string reqLastName = !string.IsNullOrWhiteSpace(request.last_name) ? request.last_name.Trim() : GetLastName(request.OwnerName);
+
             var squadAccount = await _squadService.CreateVirtualAccountAsync(
                 request.HardwareId,
-                GetFirstName(request.OwnerName),
-                GetLastName(request.OwnerName),
+                reqFirstName,
+                reqLastName,
                 request.CustomerEmail,
                 request.CustomerPhone,
                 request.CustomerBvn,
-                formattedDob,           // ✅ Safe parsed & formatted DOB
+                formattedDob,
                 request.CustomerAddress,
                 request.CustomerGender
             );
 
-            if (squadAccount == null || !string.IsNullOrEmpty(squadAccount.ErrorMessage))
+            if (squadAccount == null || !string.IsNullOrEmpty(squadAccount.ErrorMessage) || string.IsNullOrWhiteSpace(squadAccount.VirtualAccountNumber))
             {
                 bool useSandbox = _configuration.GetValue<bool>("Squad:UseSandbox");
                 if (useSandbox)
@@ -359,8 +521,11 @@ namespace SolarPaygo.Api.Controllers
                 }
                 else
                 {
-                    string errMsg = squadAccount?.ErrorMessage ?? "Failed to generate a virtual account with Squad. Please verify customer details and try again.";
-                    return BadRequest(errMsg);
+                    string err = !string.IsNullOrWhiteSpace(squadAccount?.ErrorMessage)
+                        ? squadAccount.ErrorMessage
+                        : "Failed to generate dynamic virtual account with Squad. Please ensure the First Name, Surname, Phone number, and Date of Birth match the customer's BVN records.";
+                    _logger.LogError("[Register] Squad Live Virtual Account generation failed: {Error}", err);
+                    return BadRequest($"Squad Virtual Account creation failed: {err}");
                 }
             }
 
@@ -378,20 +543,75 @@ namespace SolarPaygo.Api.Controllers
                 CustomerGender = request.CustomerGender,
                 GeneratorCapacity = !string.IsNullOrWhiteSpace(request.GeneratorCapacity) ? request.GeneratorCapacity : "2KV",
                 // Derive MaxLoadWatts from GeneratorCapacity (KV -> Watts)
-                MaxLoadWatts = (int)(ParseCapacityKw(request.GeneratorCapacity) * 1000),
-                Status = "Locked",
-                AvailableUnits = 0.0M,
-                PrepaidNairaBalance = 0.0M,
+                MaxLoadWatts = ResolveMaxLoadWatts(request.GeneratorCapacity),
+                Status = "Locked", // New systems always start locked until customer makes first payment
+                AvailableUnits = 0.0M,      // ₦0 balance — no free credit
+                PrepaidNairaBalance = 0.0M, // ₦0 balance — no free credit
                 CumulativeKwhBought = 0.0M,
                 CumulativeKwhConsumed = 0m,
                 LastSyncTime = DateTime.UtcNow,
-                LastSyncKwh = 0m
+                LastSyncKwh = 0m,
+                PricePlanId = request.PricePlanId,
+                DeviceGroupId = request.DeviceGroupId
             };
 
             _context.SolarSystems.Add(newSystem);
             await _context.SaveChangesAsync();
 
             return Ok(newSystem);
+        }
+
+        [Authorize(Roles = "Admin,SuperAdmin")]
+        [HttpPost("systems/{id}/retry-virtual-account")]
+        public async Task<IActionResult> RetryVirtualAccount(int id, [FromBody] RetryVirtualAccountRequest? req)
+        {
+            var system = await _context.SolarSystems.FindAsync(id);
+            if (system == null) return NotFound("System not found.");
+
+            if (req != null)
+            {
+                if (!string.IsNullOrWhiteSpace(req.CustomerBvn)) system.CustomerBvn = req.CustomerBvn.Trim();
+                if (!string.IsNullOrWhiteSpace(req.CustomerDob)) system.CustomerDob = req.CustomerDob.Trim();
+                if (!string.IsNullOrWhiteSpace(req.CustomerPhone)) system.CustomerPhone = req.CustomerPhone.Trim();
+                if (!string.IsNullOrWhiteSpace(req.OwnerName)) system.OwnerName = req.OwnerName.Trim();
+            }
+
+            string formattedDob = system.CustomerDob ?? "01/01/1990";
+            if (formattedDob.Contains('-'))
+            {
+                var parts = formattedDob.Split('-');
+                if (parts.Length == 3) formattedDob = $"{parts[1]}/{parts[2]}/{parts[0]}";
+            }
+
+            var squadAccount = await _squadService.CreateVirtualAccountAsync(
+                system.HardwareId,
+                GetFirstName(system.OwnerName),
+                GetLastName(system.OwnerName),
+                system.CustomerEmail,
+                system.CustomerPhone,
+                system.CustomerBvn,
+                formattedDob,
+                "Nigeria",
+                system.CustomerGender
+            );
+
+            if (squadAccount != null && string.IsNullOrEmpty(squadAccount.ErrorMessage) && !string.IsNullOrWhiteSpace(squadAccount.VirtualAccountNumber))
+            {
+                system.VirtualAccountNumber = squadAccount.VirtualAccountNumber;
+                system.VirtualBankName = squadAccount.BankName;
+                await _context.SaveChangesAsync();
+                return Ok(new { success = true, virtualAccountNumber = system.VirtualAccountNumber, bankName = system.VirtualBankName, message = "Virtual account generated successfully." });
+            }
+
+            return BadRequest(squadAccount?.ErrorMessage ?? "Failed to generate virtual account with Squad. Please check BVN and date of birth.");
+        }
+
+        public class RetryVirtualAccountRequest
+        {
+            public string? CustomerBvn { get; set; }
+            public string? CustomerDob { get; set; }
+            public string? CustomerPhone { get; set; }
+            public string? OwnerName { get; set; }
         }
 
         [Authorize(Roles = "Admin")]
@@ -431,6 +651,191 @@ namespace SolarPaygo.Api.Controllers
             return Ok(system);
         }
 
+        // Dedicated relay control — locks/opens relay without changing account status
+        [Authorize(Roles = "Admin")]
+        [HttpPost("systems/{id}/relay-off")]
+        public async Task<IActionResult> RelayOff(int id)
+        {
+            var system = await _context.SolarSystems.FindAsync(id);
+            if (system == null) return NotFound();
+
+            system.RelayState = "0";
+            if (!string.IsNullOrWhiteSpace(system.StronMeterId))
+            {
+                bool success = await _vendingService.SetRemoteSwitchAsync(system.StronMeterId, turnOn: false);
+                if (!success)
+                    return BadRequest(new { message = "Relay command sent but meter did not confirm. Check meter connectivity." });
+            }
+
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Relay opened (cut). Power supply is OFF.", system });
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpPost("systems/{id}/relay-on")]
+        public async Task<IActionResult> RelayOn(int id)
+        {
+            var system = await _context.SolarSystems.FindAsync(id);
+            if (system == null) return NotFound();
+
+            // Only restore relay if system has credit
+            if (system.AvailableUnits <= 0 || system.PrepaidNairaBalance <= 0)
+                return BadRequest(new { message = "Cannot restore relay: Account has no available units or balance. Customer must top up first." });
+
+            system.RelayState = "1";
+            if (!string.IsNullOrWhiteSpace(system.StronMeterId))
+            {
+                bool success = await _vendingService.SetRemoteSwitchAsync(system.StronMeterId, turnOn: true);
+                if (!success)
+                    return BadRequest(new { message = "Relay command sent but meter did not confirm. Check meter connectivity." });
+            }
+
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Relay closed. Power supply is ON.", system });
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpPost("systems/{id}/clear-tamper")]
+        public async Task<IActionResult> ClearTamper(int id)
+        {
+            var system = await _context.SolarSystems.FindAsync(id);
+            if (system == null) return NotFound();
+
+            if (string.IsNullOrWhiteSpace(system.StronMeterId))
+                return BadRequest(new { message = "No Stron meter linked to this system." });
+
+            string? token = await _vendingService.GenerateClearTamperTokenAsync(system.StronMeterId);
+            if (string.IsNullOrWhiteSpace(token))
+                return BadRequest(new { message = "Failed to generate Clear Tamper token from Stron server." });
+
+            bool sent = await _vendingService.SendTokenRemotelyAsync(system.StronMeterId, token);
+
+            return Ok(new { 
+                message = sent ? "Clear Tamper token sent to meter successfully." : "Clear Tamper token generated, but remote transmission failed. Please enter the token code manually on the keypad.",
+                token = token,
+                sentRemotely = sent
+            });
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpPost("systems/{id}/clear-credit")]
+        public async Task<IActionResult> ClearCredit(int id)
+        {
+            var system = await _context.SolarSystems.FindAsync(id);
+            if (system == null) return NotFound();
+
+            if (string.IsNullOrWhiteSpace(system.StronMeterId))
+                return BadRequest(new { message = "No Stron meter linked to this system." });
+
+            string? token = await _vendingService.GenerateClearCreditTokenAsync(system.StronMeterId);
+            if (string.IsNullOrWhiteSpace(token))
+                return BadRequest(new { message = "Failed to generate Clear Credit token from Stron server." });
+
+            bool sent = await _vendingService.SendTokenRemotelyAsync(system.StronMeterId, token);
+
+            // Resets units in database too
+            system.AvailableUnits = 0;
+            system.PrepaidNairaBalance = 0;
+            system.Status = "Locked";
+            system.RelayState = "0";
+            await _context.SaveChangesAsync();
+
+            return Ok(new { 
+                message = sent ? "Clear Credit token sent to meter successfully. Credit reset." : "Clear Credit token generated, but remote transmission failed. Please enter the token code manually on the keypad to reset credit.",
+                token = token,
+                sentRemotely = sent
+            });
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpPost("systems/{id}/send-token")]
+        public async Task<IActionResult> SendToken(int id, [FromBody] SendTokenRequest request)
+        {
+            var system = await _context.SolarSystems.FindAsync(id);
+            if (system == null) return NotFound();
+
+            if (string.IsNullOrWhiteSpace(system.StronMeterId))
+                return BadRequest(new { message = "No Stron meter linked to this system." });
+
+            if (string.IsNullOrWhiteSpace(request.Token))
+                return BadRequest(new { message = "Token value is required." });
+
+            bool sent = await _vendingService.SendTokenRemotelyAsync(system.StronMeterId, request.Token);
+            if (!sent)
+                return BadRequest(new { message = "Failed to send token remotely to the meter. Check meter connectivity." });
+
+            return Ok(new { message = "Token successfully transmitted to the meter." });
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpPost("systems/{id}/redeem-wallet")]
+        public async Task<IActionResult> AdminRedeemWallet(int id)
+        {
+            var system = await _context.SolarSystems.Include(s => s.PricePlan).FirstOrDefaultAsync(s => s.Id == id);
+            if (system == null) return NotFound("Solar system not found.");
+
+            if (string.IsNullOrWhiteSpace(system.StronMeterId))
+                return BadRequest("No meter is linked to this system.");
+
+            decimal rate = PricingEngine.ResolveRate(system);
+            decimal minThreshold = 0.1m * rate;
+            if (system.PendingWalletBalance < minThreshold)
+                return BadRequest($"Pending wallet balance (N{system.PendingWalletBalance:N2}) is below the minimum threshold (N{minThreshold:N2}) to vend 0.1 kWh.");
+
+            decimal unitsToReceive = Math.Round(system.PendingWalletBalance / rate, 1, MidpointRounding.AwayFromZero);
+            if (unitsToReceive < 0.1m) unitsToReceive = 0.1m;
+
+            var vendResult = await _vendingService.GenerateVendingTokenAsync(system.StronMeterId, unitsToReceive, isVendByUnit: true);
+            if (vendResult == null || string.IsNullOrWhiteSpace(vendResult.Token))
+                return BadRequest("The meter vending server could not generate a token. Balance is preserved in wallet.");
+
+            string stsToken = vendResult.Token;
+            decimal actualUnitsVended = vendResult.Units > 0 ? vendResult.Units : unitsToReceive;
+            bool otaSuccess = await _vendingService.SendTokenRemotelyAsync(system.StronMeterId, stsToken);
+
+            decimal usedAmount = Math.Round(actualUnitsVended * rate, 2);
+            decimal walletAfter = Math.Max(0m, system.PendingWalletBalance - usedAmount);
+
+            var tx = new Transaction
+            {
+                SolarSystemId = system.Id,
+                AmountPaid = usedAmount,
+                UnitsAdded = actualUnitsVended,
+                UsedAmount = usedAmount,
+                AddedToWallet = 0m,
+                WalletBalanceAfter = walletAfter,
+                RateAtTime = rate,
+                Status = "Completed",
+                StsToken = stsToken,
+                PaymentReference = "ADMIN_WALLET_" + DateTime.UtcNow.ToString("yyyyMMddHHmmss"),
+                TransactionDate = DateTime.UtcNow,
+                IsDeliveredToMeter = otaSuccess
+            };
+
+            system.AvailableUnits += actualUnitsVended;
+            system.CumulativeKwhBought += actualUnitsVended;
+            system.PendingWalletBalance = walletAfter;
+
+            if (system.AvailableUnits > 0 || system.PrepaidNairaBalance > 0)
+            {
+                system.Status = "Active";
+                system.RelayState = "1";
+                await _vendingService.SetRemoteSwitchAsync(system.StronMeterId, turnOn: true);
+            }
+
+            _context.Transactions.Add(tx);
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                success = true,
+                token = stsToken,
+                unitsAdded = actualUnitsVended,
+                walletBalance = walletAfter,
+                message = $"Successfully vended {actualUnitsVended:F2} kWh from wallet to meter {system.StronMeterId}."
+            });
+        }
+
         // Helper Split Name Methods for Squad Model
         private string GetFirstName(string fullName)
         {
@@ -440,6 +845,33 @@ namespace SolarPaygo.Api.Controllers
         }
 
         // Helper to parse numeric kW from a string like "2KV".
+        /// <summary>
+        /// The load ceiling in watts for a stored capacity code.
+        ///
+        /// Prefers the managed capacity list, where the figure is stated rather than inferred.
+        /// Reading digits out of a code only works while every code is a whole number of KV:
+        /// "7.5KV" reduces to 75, and therefore to a 75000W ceiling instead of 7500W - ten
+        /// times too high, which is a relay that never trips. The parser stays as the fallback
+        /// for any code with no matching row.
+        /// </summary>
+        private int ResolveMaxLoadWatts(string capacity)
+        {
+            if (string.IsNullOrWhiteSpace(capacity))
+                return ParseCapacityKw(capacity) * 1000 * 90 / 100;
+
+            var match = _context.GeneratorCapacities
+                .AsNoTracking()
+                .FirstOrDefault(c => c.Code == capacity);
+
+            if (match != null && match.Watts > 0)
+            {
+                int pct = match.OverloadThresholdPercent > 0 ? match.OverloadThresholdPercent : 90;
+                return (int)Math.Round((double)match.Watts * pct / 100.0);
+            }
+
+            return ParseCapacityKw(capacity) * 1000 * 90 / 100;
+        }
+
         private static int ParseCapacityKw(string capacity)
         {
             if (string.IsNullOrWhiteSpace(capacity))
@@ -456,5 +888,138 @@ namespace SolarPaygo.Api.Controllers
             var parts = fullName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             return parts.Length > 1 ? parts[parts.Length - 1] : "User";
         }
+
+        public class AssignGroupRequest
+        {
+            public int? DeviceGroupId { get; set; }
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpPost("systems/{id}/group")]
+        public async Task<IActionResult> AssignGroup(int id, [FromBody] AssignGroupRequest request)
+        {
+            var system = await _context.SolarSystems.FindAsync(id);
+            if (system == null) return NotFound("Solar system not found.");
+
+            if (request.DeviceGroupId.HasValue)
+            {
+                bool exists = await _context.DeviceGroups.AnyAsync(g => g.Id == request.DeviceGroupId.Value);
+                if (!exists) return BadRequest("Device group not found.");
+            }
+
+            system.DeviceGroupId = request.DeviceGroupId;
+            await _context.SaveChangesAsync();
+
+            return Ok(system);
+        }
+        [Authorize(Roles = "Customer")]
+        [HttpPost("my-system/reset-overload")]
+        public async Task<IActionResult> CustomerResetOverload()
+        {
+            var systemIdClaim = User.Claims.FirstOrDefault(c => c.Type == "SystemId")?.Value;
+            if (string.IsNullOrEmpty(systemIdClaim) || !int.TryParse(systemIdClaim, out int systemId))
+            {
+                return Unauthorized();
+            }
+
+            return await PerformOverloadReset(systemId);
+        }
+
+        [Authorize(Roles = "Admin")]
+        [HttpPost("systems/{id}/reset-overload")]
+        public async Task<IActionResult> AdminResetOverload(int id)
+        {
+            return await PerformOverloadReset(id);
+        }
+
+        private async Task<IActionResult> PerformOverloadReset(int systemId)
+        {
+            var system = await _context.SolarSystems.FindAsync(systemId);
+            if (system == null) return NotFound(new { message = "Solar system not found." });
+
+            // Check 1: Must have energy units in meter
+            if (system.AvailableUnits <= 0 && system.PrepaidNairaBalance <= 0)
+            {
+                return BadRequest(new { 
+                    success = false, 
+                    message = "Cannot switch ON: Your meter has 0 available units. Please recharge your account first." 
+                });
+            }
+
+            if (string.IsNullOrWhiteSpace(system.StronMeterId))
+            {
+                return BadRequest(new { success = false, message = "No meter is linked to this system." });
+            }
+
+            // Check 2: Query live meter status to verify overload is not still plugged in
+            try
+            {
+                var liveStatus = await _vendingService.QueryMeterStatusAsync(system.StronMeterId, DateTime.UtcNow);
+                if (liveStatus != null)
+                {
+                    system.Power = liveStatus.Power;
+                    system.Voltage = liveStatus.Voltage;
+                    system.Current = liveStatus.Current;
+                    system.LastSyncTime = DateTime.UtcNow;
+
+                    if (liveStatus.Power > system.MaxLoadWatts)
+                    {
+                        system.IsOverloaded = true;
+                        system.RelayState = "0";
+                        system.Status = "Locked";
+                        await _context.SaveChangesAsync();
+
+                        return BadRequest(new { 
+                            success = false, 
+                            message = $"Cannot switch ON: Overload is still active! Current draw is {liveStatus.Power:F0}W which exceeds your {system.MaxLoadWatts}W limit. Please disconnect heavy appliances (heaters, boiling rings, etc.) and try again." 
+                        });
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to query live meter status before overload reset for meter {MeterId}", system.StronMeterId);
+            }
+
+            // Check 3: Turn relay back ON via Stron API
+            bool success = await _vendingService.SetRemoteSwitchAsync(system.StronMeterId, turnOn: true);
+
+            system.Status = "Active";
+            system.RelayState = "1";
+            system.IsOverloaded = false;
+            await _context.SaveChangesAsync();
+
+            if (!success)
+            {
+                return Ok(new { 
+                    success = true, 
+                    message = "Overload status cleared and switch command queued. Since the meter is currently offline, power will restore automatically as soon as it reconnects to cellular signal.",
+                    system = new {
+                        system.Id,
+                        system.Status,
+                        system.RelayState,
+                        system.IsOverloaded
+                    }
+                });
+            }
+
+            return Ok(new { 
+                success = true, 
+                message = "Power switched ON successfully! Relay is closed and electricity is restored.",
+                system = new {
+                    system.Id,
+                    system.Status,
+                    system.RelayState,
+                    system.IsOverloaded
+                }
+            });
+        }
+    }
+
+    public class SendTokenRequest
+    {
+        public string Token { get; set; } = string.Empty;
+
     }
 }
+

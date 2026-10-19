@@ -3,9 +3,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using SolarPaygo.Api.Data;
+using SolarPaygo.Api.Models;
 using SolarPaygo.Api.Services;
+using System.Linq;
 using System.Text;
-using System.IO;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -55,7 +56,11 @@ builder.Services.AddScoped<IEmailService, SmtpEmailService>();
 builder.Services.AddScoped<ISquadService, SquadService>();
 builder.Services.AddScoped<IStronVendingService, StronVendingService>();
 builder.Services.AddScoped<ISmsService, LoggingSmsService>();
-// builder.Services.AddHostedService<LowBalanceMonitorService>();
+builder.Services.AddHostedService<DailyBillingResetService>();
+builder.Services.AddHostedService<TelemetrySyncService>();
+builder.Services.AddHostedService<LowBalanceMonitorService>();
+builder.Services.AddScoped<SolarPaygo.Api.Controllers.PaymentController>();
+builder.Services.AddHostedService<SquadPaymentSyncService>();
 
 builder.Services.AddSignalR();
 
@@ -132,22 +137,21 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<SolarDbContext>();
-    if (app.Environment.IsDevelopment())
-    {
-        // One‑time DB reset: check for marker file
-        var markerPath = Path.Combine(AppContext.BaseDirectory, "db_reset_done.marker");
-        if (!File.Exists(markerPath))
-        {
-            // Delete all tables & data
-            db.Database.EnsureDeleted();
-            // Create marker to prevent future resets
-            File.WriteAllText(markerPath, "Database reset completed at " + DateTime.UtcNow);
-        }
-    }
-    // Ensure schema exists (creates tables if missing)
+
+    // EnsureCreated() is a no-op on any database that already exists (local, UAT, production) —
+    // it only creates a schema from scratch when the database doesn't exist at all yet, and does
+    // NOT detect or apply incremental changes to an existing database. That job belongs entirely
+    // to the idempotent ALTER TABLE/CREATE TABLE block below.
     db.Database.EnsureCreated();
 
-    // Auto-migrate schema updates safely
+    // Auto-migrate schema updates safely.
+    //
+    // NOTE ON MIGRATIONS: the files under Migrations/ are generated via `dotnet ef migrations add`
+    // for historical record-keeping and EF model-snapshot diffing only. `Database.Migrate()` is
+    // never called anywhere in this app, and no environment's database has EF migrations actually
+    // applied to it — this block is the real, ongoing mechanism that evolves the schema. Do NOT run
+    // `dotnet ef database update` against any environment's database: it will attempt to re-create
+    // tables that already exist and fail.
     try
     {
         db.Database.ExecuteSqlRaw(@"
@@ -160,11 +164,288 @@ using (var scope = app.Services.CreateScope())
             BEGIN
                 ALTER TABLE SolarSystems ADD GeneratorCapacity NVARCHAR(50) NOT NULL DEFAULT '2KV';
             END
+
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'PricePlans')
+            BEGIN
+                CREATE TABLE PricePlans (
+                    Id INT IDENTITY(1,1) PRIMARY KEY,
+                    Band NVARCHAR(10) NOT NULL,
+                    Name NVARCHAR(100) NOT NULL,
+                    PricePerKwh DECIMAL(18, 2) NOT NULL,
+                    LoyaltyDiscountEnabled BIT NOT NULL DEFAULT 0,
+                    LoyaltyThresholdKwh DECIMAL(18, 2) NOT NULL DEFAULT 500,
+                    LoyaltyDiscountPercent DECIMAL(18, 2) NOT NULL DEFAULT 50,
+                    TimeFloorProtectionEnabled BIT NOT NULL DEFAULT 0,
+                    TimeFloorRatePerHour DECIMAL(18, 2) NOT NULL DEFAULT 313,
+                    TimeFloorMinimumKwh DECIMAL(18, 2) NOT NULL DEFAULT 0.3,
+                    CreatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+                    UpdatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+                );
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('SolarSystems') AND name = 'PricePlanId')
+            BEGIN
+                ALTER TABLE SolarSystems ADD PricePlanId INT NULL;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('PricePlans') AND name = 'LoyaltyThresholdKwh')
+            BEGIN
+                ALTER TABLE PricePlans ADD LoyaltyThresholdKwh DECIMAL(18, 2) NOT NULL DEFAULT 500;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('PricePlans') AND name = 'LoyaltyDiscountPercent')
+            BEGIN
+                ALTER TABLE PricePlans ADD LoyaltyDiscountPercent DECIMAL(18, 2) NOT NULL DEFAULT 50;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('PricePlans') AND name = 'TimeFloorRatePerHour')
+            BEGIN
+                ALTER TABLE PricePlans ADD TimeFloorRatePerHour DECIMAL(18, 2) NOT NULL DEFAULT 313;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('PricePlans') AND name = 'TimeFloorMinimumKwh')
+            BEGIN
+                ALTER TABLE PricePlans ADD TimeFloorMinimumKwh DECIMAL(18, 2) NOT NULL DEFAULT 0.3;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('SolarSystems') AND name = 'PendingWalletBalance')
+            BEGIN
+                ALTER TABLE SolarSystems ADD PendingWalletBalance DECIMAL(18, 2) NOT NULL DEFAULT 0.0;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('SolarSystems') AND name = 'LowBalanceNotified')
+            BEGIN
+                ALTER TABLE SolarSystems ADD LowBalanceNotified BIT NOT NULL DEFAULT 0;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Transactions') AND name = 'UsedAmount')
+            BEGIN
+                ALTER TABLE Transactions ADD UsedAmount DECIMAL(18, 2) NULL;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Transactions') AND name = 'AddedToWallet')
+            BEGIN
+                ALTER TABLE Transactions ADD AddedToWallet DECIMAL(18, 2) NULL;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Transactions') AND name = 'WalletBalanceAfter')
+            BEGIN
+                ALTER TABLE Transactions ADD WalletBalanceAfter DECIMAL(18, 2) NULL;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Transactions') AND name = 'RateAtTime')
+            BEGIN
+                ALTER TABLE Transactions ADD RateAtTime DECIMAL(18, 2) NULL;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('Transactions') AND name = 'IsDeliveredToMeter')
+            BEGIN
+                ALTER TABLE Transactions ADD IsDeliveredToMeter BIT NOT NULL DEFAULT 0;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('SolarSystems') AND name = 'IsOverloaded')
+            BEGIN
+                ALTER TABLE SolarSystems ADD IsOverloaded BIT NOT NULL DEFAULT 0;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('SolarSystems') AND name = 'CustomerPassword')
+            BEGIN
+                ALTER TABLE SolarSystems ADD CustomerPassword NVARCHAR(200) NULL;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'AdminAccounts')
+            BEGIN
+                CREATE TABLE AdminAccounts (
+                    Id INT IDENTITY(1,1) PRIMARY KEY,
+                    Username NVARCHAR(100) NOT NULL UNIQUE,
+                    Password NVARCHAR(200) NOT NULL,
+                    Role NVARCHAR(50) NOT NULL DEFAULT 'Admin',
+                    IsActive BIT NOT NULL DEFAULT 1,
+                    CreatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+                );
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'DeviceGroups')
+            BEGIN
+                CREATE TABLE DeviceGroups (
+                    Id INT IDENTITY(1,1) PRIMARY KEY,
+                    Name NVARCHAR(100) NOT NULL,
+                    Description NVARCHAR(500) NULL,
+                    DisplayOrder INT NOT NULL DEFAULT 0,
+                    IsActive BIT NOT NULL DEFAULT 1,
+                    CreatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+                    UpdatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+                );
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('SolarSystems') AND name = 'DeviceGroupId')
+            BEGIN
+                ALTER TABLE SolarSystems ADD DeviceGroupId INT NULL;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('GeneratorCapacities') AND name = 'OverloadThresholdPercent')
+            BEGIN
+                ALTER TABLE GeneratorCapacities ADD OverloadThresholdPercent INT NOT NULL DEFAULT 90;
+            END
+            -- Smart Remittance & Exit Governance columns on DeviceGroups
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('DeviceGroups') AND name = 'InvestorsCapital')
+            BEGIN
+                ALTER TABLE DeviceGroups ADD InvestorsCapital DECIMAL(18,2) NOT NULL DEFAULT 0;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('DeviceGroups') AND name = 'IsRoiEnabled')
+            BEGIN
+                ALTER TABLE DeviceGroups ADD IsRoiEnabled BIT NOT NULL DEFAULT 0;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('DeviceGroups') AND name = 'RoiPercentage')
+            BEGIN
+                ALTER TABLE DeviceGroups ADD RoiPercentage DECIMAL(18,2) NOT NULL DEFAULT 15.00;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('DeviceGroups') AND name = 'RemittanceSharePercent')
+            BEGIN
+                ALTER TABLE DeviceGroups ADD RemittanceSharePercent DECIMAL(18,2) NOT NULL DEFAULT 100.00;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('DeviceGroups') AND name = 'SettlementCycle')
+            BEGIN
+                ALTER TABLE DeviceGroups ADD SettlementCycle NVARCHAR(50) NOT NULL DEFAULT 'Monthly';
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('DeviceGroups') AND name = 'InvestmentStartDate')
+            BEGIN
+                ALTER TABLE DeviceGroups ADD InvestmentStartDate DATETIME2 NULL;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('DeviceGroups') AND name = 'IsReturnCapital')
+            BEGIN
+                ALTER TABLE DeviceGroups ADD IsReturnCapital BIT NOT NULL DEFAULT 0;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('DeviceGroups') AND name = 'ExitNoticeDate')
+            BEGIN
+                ALTER TABLE DeviceGroups ADD ExitNoticeDate DATETIME2 NULL;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('DeviceGroups') AND name = 'ExitTargetDate')
+            BEGIN
+                ALTER TABLE DeviceGroups ADD ExitTargetDate DATETIME2 NULL;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('DeviceGroups') AND name = 'ExitCapitalAmount')
+            BEGIN
+                ALTER TABLE DeviceGroups ADD ExitCapitalAmount DECIMAL(18,2) NULL;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('DeviceGroups') AND name = 'IsAccountClosed')
+            BEGIN
+                ALTER TABLE DeviceGroups ADD IsAccountClosed BIT NOT NULL DEFAULT 0;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('DeviceGroups') AND name = 'InvestorAdminAccountId')
+            BEGIN
+                ALTER TABLE DeviceGroups ADD InvestorAdminAccountId INT NULL;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('AdminAccounts') AND name = 'DeviceGroupId')
+            BEGIN
+                ALTER TABLE AdminAccounts ADD DeviceGroupId INT NULL;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'InvestorSettlements')
+            BEGIN
+                CREATE TABLE InvestorSettlements (
+                    Id INT IDENTITY(1,1) PRIMARY KEY,
+                    DeviceGroupId INT NOT NULL,
+                    Amount DECIMAL(18,2) NOT NULL,
+                    SettlementCycle NVARCHAR(50) NOT NULL DEFAULT 'Monthly',
+                    Status NVARCHAR(50) NOT NULL DEFAULT 'Settled',
+                    Reference NVARCHAR(200) NULL,
+                    Notes NVARCHAR(500) NULL,
+                    SettledAt DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+                    CreatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+                );
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'GeneratorCapacities')
+            BEGIN
+                CREATE TABLE GeneratorCapacities (
+                    Id INT IDENTITY(1,1) PRIMARY KEY,
+                    Code NVARCHAR(50) NOT NULL,
+                    Name NVARCHAR(200) NOT NULL,
+                    Watts INT NOT NULL,
+                    IsActive BIT NOT NULL DEFAULT 1,
+                    DisplayOrder INT NOT NULL DEFAULT 0,
+                    CreatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+                    UpdatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+                );
+            END
         ");
     }
     catch (Exception ex)
     {
         Console.WriteLine("[DB Update] Error applying DB column updates: " + ex.Message);
+    }
+
+    // Seed the 3 fixed price bands (A/B/C) if none exist yet.
+    // This never touches any SolarSystem row — PricePlanId stays null (legacy pricing)
+    // for every existing customer until an admin explicitly assigns a band.
+    try
+    {
+        if (!db.PricePlans.Any())
+        {
+            db.PricePlans.AddRange(
+                new PricePlan { Band = "A", Name = "Band A", PricePerKwh = 2500m, LoyaltyDiscountEnabled = true, TimeFloorProtectionEnabled = true },
+                new PricePlan { Band = "B", Name = "Band B", PricePerKwh = 2500m, LoyaltyDiscountEnabled = false, TimeFloorProtectionEnabled = true },
+                new PricePlan { Band = "C", Name = "Band C", PricePerKwh = 2500m, LoyaltyDiscountEnabled = false, TimeFloorProtectionEnabled = false }
+            );
+            db.SaveChanges();
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine("[DB Seed] Error seeding price plans: " + ex.Message);
+    }
+
+    // Seed exactly the sizes the registration form already offered, so the picker looks
+    // identical the first time this runs and no existing customer's stored capacity string
+    // stops resolving. Watts are stated rather than parsed from the code: "7.5KV" read as
+    // digits gives 75, and a 75000W ceiling is a relay that never trips.
+    try
+    {
+        if (!db.AdminAccounts.Any())
+        {
+            db.AdminAccounts.AddRange(
+                new AdminAccount { Username = "superadmin", Password = "SuperAdmin@2026!", Role = "SuperAdmin", IsActive = true },
+                new AdminAccount { Username = "admin", Password = "admin123", Role = "Admin", IsActive = true }
+            );
+            db.SaveChanges();
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine("[DB Seed] Error seeding admin accounts: " + ex.Message);
+    }
+
+    try
+    {
+        if (!db.GeneratorCapacities.Any())
+        {
+            db.GeneratorCapacities.AddRange(
+                new GeneratorCapacity { Code = "1KV",   Name = "Small (Residential, 1 room)",  Watts = 1000,  DisplayOrder = 1 },
+                new GeneratorCapacity { Code = "2KV",   Name = "Medium (Standard Household)",  Watts = 2000,  DisplayOrder = 2 },
+                new GeneratorCapacity { Code = "3KV",   Name = "Large (Small Business / Shop)", Watts = 3000, DisplayOrder = 3 },
+                new GeneratorCapacity { Code = "5KV",   Name = "Extra Large (Commercial)",     Watts = 5000,  DisplayOrder = 4 },
+                new GeneratorCapacity { Code = "7.5KV", Name = "Heavy Duty",                   Watts = 7500,  DisplayOrder = 5 },
+                new GeneratorCapacity { Code = "10KV",  Name = "Industrial",                   Watts = 10000, DisplayOrder = 6 }
+            );
+            db.SaveChanges();
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine("[DB Seed] Error seeding generator capacities: " + ex.Message);
     }
 }
 

@@ -22,6 +22,54 @@ namespace SolarPaygo.Api.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("SolarPaygo.Api.Models.PricePlan", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Band")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("LoyaltyDiscountEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<decimal>("LoyaltyDiscountPercent")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("LoyaltyThresholdKwh")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<decimal>("PricePerKwh")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("TimeFloorMinimumKwh")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<bool>("TimeFloorProtectionEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<decimal>("TimeFloorRatePerHour")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("PricePlans");
+                });
+
             modelBuilder.Entity("SolarPaygo.Api.Models.SolarSystem", b =>
                 {
                     b.Property<int>("Id")
@@ -87,17 +135,26 @@ namespace SolarPaygo.Api.Migrations
                     b.Property<DateTime?>("LastSyncTime")
                         .HasColumnType("datetime2");
 
+                    b.Property<bool>("LowBalanceNotified")
+                        .HasColumnType("bit");
+
                     b.Property<int>("MaxLoadWatts")
                         .HasColumnType("int");
 
                     b.Property<string>("OwnerName")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<decimal>("PendingWalletBalance")
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<decimal>("Power")
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal>("PrepaidNairaBalance")
                         .HasColumnType("decimal(18,2)");
+
+                    b.Property<int?>("PricePlanId")
+                        .HasColumnType("int");
 
                     b.Property<string>("RelayState")
                         .IsRequired()
@@ -120,6 +177,8 @@ namespace SolarPaygo.Api.Migrations
                         .HasColumnType("decimal(18,2)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("PricePlanId");
 
                     b.ToTable("SolarSystems");
                 });
@@ -183,6 +242,16 @@ namespace SolarPaygo.Api.Migrations
                     b.HasIndex("SolarSystemId");
 
                     b.ToTable("UsageLogs");
+                });
+
+            modelBuilder.Entity("SolarPaygo.Api.Models.SolarSystem", b =>
+                {
+                    b.HasOne("SolarPaygo.Api.Models.PricePlan", "PricePlan")
+                        .WithMany()
+                        .HasForeignKey("PricePlanId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("PricePlan");
                 });
 
             modelBuilder.Entity("SolarPaygo.Api.Models.Transaction", b =>

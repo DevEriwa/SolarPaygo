@@ -26,13 +26,35 @@ namespace SolarPaygo.Api.Services
                     var context = scope.ServiceProvider.GetRequiredService<SolarDbContext>();
                     var emailService = scope.ServiceProvider.GetRequiredService<IEmailService>();
 
-                    // Find active systems with less than 5 kWh remaining
-                    var lowSystems = await context.SolarSystems
-                        .Where(s => s.Status == "Active" && s.AvailableUnits < 5 && s.AvailableUnits > 0)
+                    // Look at all active systems so we can both fire new alerts and reset the
+                    // notified flag once a system recovers above the threshold.
+                    var activeSystems = await context.SolarSystems
+                        .Where(s => s.Status == "Active")
                         .ToListAsync(stoppingToken);
 
-                    foreach (var sys in lowSystems)
+                    bool anyChanges = false;
+
+                    foreach (var sys in activeSystems)
                     {
+                        bool isLow = sys.AvailableUnits < 5 && sys.AvailableUnits > 0;
+
+                        if (!isLow)
+                        {
+                            // Balance recovered (top-up or otherwise) — arm for the next dip.
+                            if (sys.LowBalanceNotified)
+                            {
+                                sys.LowBalanceNotified = false;
+                                anyChanges = true;
+                            }
+                            continue;
+                        }
+
+                        // Already notified for this ongoing low-balance episode — don't resend.
+                        if (sys.LowBalanceNotified)
+                        {
+                            continue;
+                        }
+
                         // Skip if no customer email is on file — cannot notify
                         if (string.IsNullOrWhiteSpace(sys.CustomerEmail))
                         {
@@ -86,12 +108,21 @@ namespace SolarPaygo.Api.Services
                         {
                             await emailService.SendEmailAsync(sys.CustomerEmail, subject, htmlBody);
                             _logger.LogInformation("[LowBalance] Sent low-balance alert to {Email} for system {HardwareId} ({Units} kWh remaining).", sys.CustomerEmail, sys.HardwareId, unitsLeft);
+                            // Only mark as notified on a successful send, so a failed attempt
+                            // gets retried next cycle instead of going silent.
+                            sys.LowBalanceNotified = true;
+                            anyChanges = true;
                         }
                         catch (Exception emailEx)
                         {
                             _logger.LogError(emailEx, "[LowBalance] Failed to send low-balance email to {Email} for system {HardwareId}.", sys.CustomerEmail, sys.HardwareId);
                             // Continue processing other systems even if one email fails
                         }
+                    }
+
+                    if (anyChanges)
+                    {
+                        await context.SaveChangesAsync(stoppingToken);
                     }
                 }
                 catch (Exception ex)

@@ -1,14 +1,23 @@
-import { useState, useEffect } from 'react';
-import { Lock, Unlock, MinusCircle, CreditCard, Plus, Activity, User, ShieldAlert, BadgeCheck, Phone, Mail, FileText } from 'lucide-react';
+﻿import InvestorAdminSection from '../components/InvestorAdminSection';
+import React, { useState, useEffect } from 'react';
+import { Search, Lock, Unlock, MinusCircle, CreditCard, Plus, Activity, User, ShieldAlert, BadgeCheck, Phone, Mail, FileText, Coins, Power, Key } from 'lucide-react';
 import { BASE_URL } from '../config';
 
-export default function Dashboard({ dashboardData, loading, refreshData }) {
+export default function Dashboard({ dashboardData, loading, refreshData, pricePlans = [] }) {
   const [filter, setFilter] = useState('All');
   
   // Registration modal states
+  const [activeView, setActiveView] = useState('generators'); // 'generators' or 'customers'
+  const [expandedCustomerId, setExpandedCustomerId] = useState(null);
+  const [customerTransactions, setCustomerTransactions] = useState({});
+  const [loadingTransactions, setLoadingTransactions] = useState({});
+
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [regHardwareId, setRegHardwareId] = useState('');
   const [regOwnerName, setRegOwnerName] = useState('');
+  const [regFirstName, setRegFirstName] = useState('');
+  const [regMiddleName, setRegMiddleName] = useState('');
+  const [regLastName, setRegLastName] = useState('');
   const [regMeterId, setRegMeterId] = useState('');
   const [regEmail, setRegEmail] = useState('');
   const [regPhone, setRegPhone] = useState('');
@@ -16,9 +25,126 @@ export default function Dashboard({ dashboardData, loading, refreshData }) {
   const [regGender, setRegGender] = useState('');
   const [regDob, setRegDob] = useState('');
   const [regGeneratorCapacity, setRegGeneratorCapacity] = useState('2KV');
+
+  // The sizes admins can now manage. Seeded with exactly the list this form has always
+  // shown, so if the request fails - or an older API is deployed - the form still offers
+  // every option it did before rather than an empty dropdown nobody can register through.
+  const FALLBACK_CAPACITIES = [
+    { code: '1KV', name: 'Small (Residential, 1 room)' },
+    { code: '2KV', name: 'Medium (Standard Household)' },
+    { code: '3KV', name: 'Large (Small Business / Shop)' },
+    { code: '5KV', name: 'Extra Large (Commercial)' },
+    { code: '7.5KV', name: 'Heavy Duty' },
+    { code: '10KV', name: 'Industrial' },
+  ];
+  const [capacities, setCapacities] = useState(FALLBACK_CAPACITIES);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const gRes = await fetch(`${BASE_URL}/devicegroup`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (gRes.ok) {
+          const gData = await gRes.json();
+          if (!cancelled && Array.isArray(gData)) setDeviceGroups(gData);
+        }
+
+        const response = await fetch(`${BASE_URL}/generatorcapacity`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!response.ok) return;
+
+        const data = await response.json();
+        // Only take over from the fallback when there is actually something to show.
+        // An empty list would leave the form unusable, and the built-in sizes are a
+        // better answer than none.
+        if (!cancelled && Array.isArray(data) && data.length > 0) {
+          setCapacities(data);
+
+          // The form defaults to 2KV. If an admin has retired that size it would no
+          // longer be in the list, leaving the picker showing nothing and submitting an
+          // empty capacity - so fall to whatever the first offered size is.
+          setRegGeneratorCapacity(prev =>
+            data.some(c => c.code === prev) ? prev : data[0].code
+          );
+        }
+      } catch {
+        // Keeps the built-in list. Registration is more important than the list being
+        // current, so this failing must not stop anyone registering a generator.
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, []);
+  const [regPricePlanId, setRegPricePlanId] = useState('');
+  const [regDeviceGroupId, setRegDeviceGroupId] = useState('');
+  const [deviceGroups, setDeviceGroups] = useState([]);
+  const [selectedGroupTab, setSelectedGroupTab] = useState('All');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [adminResetLoading, setAdminResetLoading] = useState({});
+  const [overloadNotice, setOverloadNotice] = useState(null);
+
+  const handleAdminResetOverload = async (sysId) => {
+    setAdminResetLoading(prev => ({ ...prev, [sysId]: true }));
+    setOverloadNotice(null);
+    try {
+      const activeToken = localStorage.getItem('token');
+      const res = await fetch(`${BASE_URL}/dashboard/systems/${sysId}/reset-overload`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${activeToken}`, 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setOverloadNotice({ type: 'success', text: data.message });
+        if (typeof refreshData === 'function') refreshData();
+      } else {
+        setOverloadNotice({ type: 'error', text: data.message || 'Failed to switch on power.' });
+      }
+    } catch {
+      setOverloadNotice({ type: 'error', text: 'Network error switching on meter.' });
+    } finally {
+      setAdminResetLoading(prev => ({ ...prev, [sysId]: false }));
+    }
+  };
+  const [adminPasswordResetLoading, setAdminPasswordResetLoading] = useState({});
+  const [adminPasswordNotice, setAdminPasswordNotice] = useState(null);
+
+  const handleAdminResetPassword = async (sys) => {
+    const customerName = sys.ownerName || sys.OwnerName || 'Customer';
+    const hardwareId = sys.hardwareId || sys.HardwareId || 'N/A';
+    if (!window.confirm(`Are you sure you want to reset the login password for ${customerName}?\n\nTheir password will be reset to their default Hardware ID (${hardwareId}).`)) {
+      return;
+    }
+
+    setAdminPasswordResetLoading(prev => ({ ...prev, [sys.id]: true }));
+    setAdminPasswordNotice(null);
+    try {
+      const activeToken = localStorage.getItem('token');
+      const res = await fetch(`${BASE_URL}/auth/admin-reset-customer-password/${sys.id}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${activeToken}`, 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setAdminPasswordNotice({ type: 'success', text: data.message || `Password for ${customerName} has been reset to default (${hardwareId}).` });
+      } else {
+        setAdminPasswordNotice({ type: 'error', text: data.message || 'Failed to reset customer password.' });
+      }
+    } catch {
+      setAdminPasswordNotice({ type: 'error', text: 'Network error resetting customer password.' });
+    } finally {
+      setAdminPasswordResetLoading(prev => ({ ...prev, [sys.id]: false }));
+    }
+  };
   const [regError, setRegError] = useState(null);
   const [regSuccess, setRegSuccess] = useState(false);
   const [regLoading, setRegLoading] = useState(false);
+  const [relayError, setRelayError] = useState(null);
+  const [relayLoading, setRelayLoading] = useState(null); // id of system being toggled
 
   // Derive summary from passed-in data
   const summary = dashboardData || { systems: [], revenueToday: 0, recentPayments: [] };
@@ -31,8 +157,13 @@ export default function Dashboard({ dashboardData, loading, refreshData }) {
 
     try {
       const token = localStorage.getItem('token');
-      const formattedDob = regDob ? new Date(regDob).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }) : '';
-const response = await fetch(`${BASE_URL}/dashboard/register`, {
+            let formattedDob = regDob;
+      if (regDob && regDob.includes('-')) {
+        const [y, m, d] = regDob.split('-');
+        if (y && m && d) formattedDob = `${m.padStart(2, '0')}/${d.padStart(2, '0')}/${y}`;
+      }
+      const computedFullName = [regFirstName.trim(), regMiddleName.trim(), regLastName.trim()].filter(Boolean).join(' ') || regOwnerName.trim();
+      const response = await fetch(`${BASE_URL}/dashboard/register`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -41,14 +172,19 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
 
         body: JSON.stringify({
           hardwareId: regHardwareId.trim(),
-          ownerName: regOwnerName.trim(),
+          ownerName: computedFullName,
+          first_name: regFirstName.trim(),
+          last_name: regLastName.trim(),
+          middle_name: regMiddleName.trim(),
           stronMeterId: regMeterId.trim(),
           customerEmail: regEmail.trim(),
           customerPhone: regPhone.trim(),
           customerBvn: regBvn.trim(),
           customerDob: formattedDob,
           customerGender: regGender,
-          generatorCapacity: regGeneratorCapacity
+          generatorCapacity: regGeneratorCapacity,
+          pricePlanId: regPricePlanId ? parseInt(regPricePlanId, 10) : null,
+          deviceGroupId: regDeviceGroupId ? parseInt(regDeviceGroupId, 10) : null
         })
       });
 
@@ -56,12 +192,17 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
         setRegSuccess(true);
         setRegHardwareId('');
         setRegOwnerName('');
+        setRegFirstName('');
+        setRegMiddleName('');
+        setRegLastName('');
         setRegMeterId('');
         setRegEmail('');
         setRegPhone('');
         setRegBvn('');
         setRegDob('');
         setRegGeneratorCapacity('2KV');
+        setRegPricePlanId('');
+        setRegDeviceGroupId('');
         refreshData();
         setTimeout(() => setIsRegisterOpen(false), 2000);
       } else {
@@ -76,6 +217,8 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
   };
 
   const handleToggleState = async (id, action) => {
+    setRelayError(null);
+    setRelayLoading(id);
     try {
       const token = localStorage.getItem('token');
       const response = await fetch(`${BASE_URL}/dashboard/systems/${id}/${action}`, {
@@ -84,16 +227,177 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
       });
       if (response.ok) {
         refreshData(); // Re-fetch shared data in App.jsx
+      } else {
+        // Try to read a meaningful error from the backend
+        try {
+          const errData = await response.json();
+          setRelayError(errData.message || `Action "${action}" failed (${response.status})`);
+        } catch {
+          setRelayError(`Action "${action}" failed (${response.status})`);
+        }
       }
     } catch (err) {
+      setRelayError(`Network error: could not reach API for system ${id}`);
       console.error(`Failed to ${action} system ${id}`);
+    } finally {
+      setRelayLoading(null);
+    }
+  };
+
+  const [groupAssignLoading, setGroupAssignLoading] = useState(null);
+  const handleAssignGroup = async (systemId, deviceGroupId) => {
+    setGroupAssignLoading(systemId);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${BASE_URL}/dashboard/systems/${systemId}/group`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ deviceGroupId: deviceGroupId ? parseInt(deviceGroupId, 10) : null })
+      });
+      if (response.ok) {
+        refreshData();
+      }
+    } catch {
+      console.error('Failed to assign device group');
+    } finally {
+      setGroupAssignLoading(null);
+    }
+  };
+
+  const [bandAssignLoading, setBandAssignLoading] = useState(null); // id of system being assigned
+  const [bandAssignError, setBandAssignError] = useState(null);
+
+  const handleAssignBand = async (systemId, pricePlanId) => {
+    setBandAssignLoading(systemId);
+    setBandAssignError(null);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${BASE_URL}/priceplan/assign`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ solarSystemId: systemId, pricePlanId: pricePlanId ? parseInt(pricePlanId, 10) : null })
+      });
+      if (response.ok) {
+        refreshData();
+      } else {
+        const txt = await response.text();
+        setBandAssignError(txt || 'Failed to assign price band.');
+      }
+    } catch {
+      setBandAssignError('Connection to backend API failed.');
+    } finally {
+      setBandAssignLoading(null);
+    }
+  };
+
+  const fetchCustomerTransactions = async (systemId) => {
+    if (customerTransactions[systemId]) return; // already loaded
+    setLoadingTransactions(prev => ({ ...prev, [systemId]: true }));
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${BASE_URL}/dashboard/systems/${systemId}/transactions`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setCustomerTransactions(prev => ({ 
+          ...prev, 
+          [systemId]: Array.isArray(data) ? data : (data.recentTransactions || [])
+        }));
+      }
+    } catch (err) {
+      console.error("Failed to load customer transactions", err);
+    } finally {
+      setLoadingTransactions(prev => ({ ...prev, [systemId]: false }));
+    }
+  };
+
+  const [expandedSystemId, setExpandedSystemId] = useState(null);
+  const [stronTokenResult, setStronTokenResult] = useState(null);
+  const [manualToken, setManualToken] = useState('');
+  const [adminActionLoading, setAdminActionLoading] = useState(false);
+
+  const handleAdminAction = async (id, action, body = null) => {
+    setRelayError(null);
+    setStronTokenResult(null);
+    setAdminActionLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const config = {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      };
+      if (body) {
+        config.body = JSON.stringify(body);
+      }
+      
+      const response = await fetch(`${BASE_URL}/dashboard/systems/${id}/${action}`, config);
+      const data = await response.json();
+      
+      if (response.ok) {
+        setStronTokenResult({
+          token: data.token || null,
+          message: data.message || "Action completed successfully."
+        });
+        refreshData();
+      } else {
+        setRelayError(data.message || `Action failed with status ${response.status}`);
+      }
+    } catch (err) {
+      setRelayError("Network connection error. Check if backend API is reachable.");
+    } finally {
+      setAdminActionLoading(false);
     }
   };
 
   const systems = summary.systems || summary.Systems || [];
   const activeSystems = systems.filter(s => s.status === 'Active' || s.status === 'active');
   const lockedSystems = systems.filter(s => s.status === 'Locked' || s.status === 'locked');
-  const filteredSystems = filter === 'All' ? systems : systems.filter(s => s.status === filter);
+
+  const matchesSearch = (s, q) => {
+    if (!q) return true;
+    const term = q.toLowerCase().trim();
+    return (
+      (s.ownerName && s.ownerName.toLowerCase().includes(term)) ||
+      (s.hardwareId && s.hardwareId.toLowerCase().includes(term)) ||
+      (s.stronMeterId && s.stronMeterId.toLowerCase().includes(term)) ||
+      (s.customerEmail && s.customerEmail.toLowerCase().includes(term)) ||
+      (s.customerPhone && s.customerPhone.toLowerCase().includes(term)) ||
+      (s.virtualAccountNumber && s.virtualAccountNumber.toLowerCase().includes(term))
+    );
+  };
+
+  const groupFilteredSystems = selectedGroupTab === 'All'
+    ? systems
+    : selectedGroupTab === 'Ungrouped'
+      ? systems.filter(s => !s.deviceGroupId && !s.deviceGroup)
+      : systems.filter(s => {
+          if (s.deviceGroup && s.deviceGroup.name === selectedGroupTab) return true;
+          const g = deviceGroups.find(dg => dg.name === selectedGroupTab);
+          return g && s.deviceGroupId === g.id;
+        });
+
+  const customerFilteredSystems = groupFilteredSystems.filter(s => matchesSearch(s, searchTerm));
+
+  const statusFilteredSystems = filter === 'All'
+    ? groupFilteredSystems
+    : groupFilteredSystems.filter(s => s.status === filter);
+
+  const filteredSystems = statusFilteredSystems.filter(s => matchesSearch(s, searchTerm));
+
+  // Derive overall sync health: green if ALL meters with a Stron ID reported online, orange/red otherwise
+  const metersWithId = systems.filter(s => s.stronMeterId || s.StronMeterId);
+  const onlineCount = metersWithId.filter(s => s.meterOnline || s.MeterOnline).length;
+  const syncStatus = metersWithId.length === 0 ? 'none' : onlineCount === metersWithId.length ? 'online' : onlineCount === 0 ? 'offline' : 'partial';
 
   // Formatting helpers
   const formatNaira = (amount) => new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN', minimumFractionDigits: 0 }).format(amount);
@@ -118,15 +422,82 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
           <button onClick={() => { setRegSuccess(false); setRegError(null); setIsRegisterOpen(true); }} className="action-btn" style={{ background: 'var(--primary-accent)', color: 'var(--bg-dark)', borderColor: 'var(--primary-accent)', flexDirection: 'row', gap: '8px', padding: '8px 16px' }}>
             <Plus size={18} /> Register Generator
           </button>
-          <div className="live-badge">
-            <div className="live-dot"></div>
-            Live Smart Sync
+          <div className="live-badge" style={{
+            background: syncStatus === 'online' ? 'rgba(16,185,129,0.15)' : syncStatus === 'offline' ? 'rgba(239,68,68,0.15)' : 'rgba(245,158,11,0.15)',
+            border: `1px solid ${syncStatus === 'online' ? 'rgba(16,185,129,0.4)' : syncStatus === 'offline' ? 'rgba(239,68,68,0.4)' : 'rgba(245,158,11,0.4)'}`,
+            color: syncStatus === 'online' ? 'var(--success)' : syncStatus === 'offline' ? 'var(--danger)' : 'var(--warning)'
+          }}>
+            <div className="live-dot" style={{ background: syncStatus === 'online' ? 'var(--success)' : syncStatus === 'offline' ? 'var(--danger)' : 'var(--warning)' }}></div>
+            {syncStatus === 'online' ? 'Meter Online' : syncStatus === 'offline' ? 'Meter Offline' : syncStatus === 'partial' ? 'Partial Sync' : 'No Meter ID'}
           </div>
         </div>
       </div>
 
-      {/* STATS GRID */}
-      <div className="stats-grid">
+      {/* View Switcher Tabs */}
+      <div style={{ display: 'flex', gap: '12px', marginBottom: '28px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+        <button 
+          onClick={() => setActiveView('generators')} 
+          style={{
+            padding: '10px 20px', 
+            borderRadius: '6px', 
+            background: activeView === 'generators' ? 'var(--primary-accent)' : 'transparent',
+            color: activeView === 'generators' ? 'var(--bg-dark)' : 'var(--text-muted)',
+            border: 'none',
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            fontSize: '0.9rem',
+            transition: 'all 0.2s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}
+        >
+          ⚡ Generators & Telemetry
+        </button>
+        <button 
+          onClick={() => setActiveView('customers')} 
+          style={{
+            padding: '10px 20px', 
+            borderRadius: '6px', 
+            background: activeView === 'customers' ? 'var(--primary-accent)' : 'transparent',
+            color: activeView === 'customers' ? 'var(--bg-dark)' : 'var(--text-muted)',
+            border: 'none',
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            fontSize: '0.9rem',
+            transition: 'all 0.2s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}
+        >
+          👤 Customer Profiles & Payments
+        </button>
+        <button 
+          onClick={() => setActiveView('investors')} 
+          style={{
+            padding: '10px 20px', 
+            borderRadius: '6px', 
+            background: activeView === 'investors' ? 'var(--primary-accent)' : 'transparent',
+            color: activeView === 'investors' ? 'var(--bg-dark)' : 'var(--text-muted)',
+            border: 'none',
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            fontSize: '0.9rem',
+            transition: 'all 0.2s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}
+        >
+          💼 Investor Payouts & Yields
+        </button>
+      </div>
+
+      {activeView === 'generators' && (
+        <div>
+          {/* STATS GRID */}
+          <div className="stats-grid">
         <div className="stat-card">
           <h3>Total Devices</h3>
           <div className="value blue">{systems.length}</div>
@@ -151,16 +522,88 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
 
       {/* SOLAR GENERATOR UNITS SECTION */}
       <div className="glass-panel">
-        <div className="panel-header">
-          <h2>Solar Systems Status</h2>
-          <div className="filter-tabs">
-            {['All', 'Active', 'Locked', 'Disabled'].map(f => (
-              <button key={f} className={`filter-tab ${filter === f ? 'active' : ''}`} onClick={() => setFilter(f)}>
-                {f}
-              </button>
-            ))}
+        {/* Device Group / Tab Selector */}
+        {deviceGroups.length > 0 && (
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', overflowX: 'auto', paddingBottom: '8px', borderBottom: '1px solid var(--border-color)' }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', fontWeight: 'bold', marginRight: '4px' }}>
+              🏷️ Group Tabs:
+            </span>
+            <button
+              className={`filter-tab ${selectedGroupTab === 'All' ? 'active' : ''}`}
+              onClick={() => setSelectedGroupTab('All')}
+              style={{ fontSize: '0.82rem', padding: '6px 14px' }}
+            >
+              All Groups ({systems.length})
+            </button>
+            {deviceGroups.map(g => {
+              const count = systems.filter(s => s.deviceGroupId === g.id || (s.deviceGroup && s.deviceGroup.name === g.name)).length;
+              return (
+                <button
+                  key={g.id}
+                  className={`filter-tab ${selectedGroupTab === g.name ? 'active' : ''}`}
+                  onClick={() => setSelectedGroupTab(g.name)}
+                  style={{ fontSize: '0.82rem', padding: '6px 14px' }}
+                >
+                  {g.name} ({count})
+                </button>
+              );
+            })}
+            <button
+              className={`filter-tab ${selectedGroupTab === 'Ungrouped' ? 'active' : ''}`}
+              onClick={() => setSelectedGroupTab('Ungrouped')}
+              style={{ fontSize: '0.82rem', padding: '6px 14px' }}
+            >
+              Ungrouped ({systems.filter(s => !s.deviceGroupId && !s.deviceGroup).length})
+            </button>
+          </div>
+        )}
+
+        <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
+          <h2>Solar Systems Status {selectedGroupTab !== 'All' ? `(${selectedGroupTab})` : ''}</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <div style={{ position: 'relative', width: '250px' }}>
+              <Search size={15} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <input
+                type="text"
+                placeholder="Search device, meter, customer..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '7px 28px 7px 32px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--border-color)',
+                  background: 'rgba(255,255,255,0.04)',
+                  color: 'white',
+                  fontSize: '0.84rem',
+                  outline: 'none'
+                }}
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm('')}
+                  style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1rem', lineHeight: 1 }}
+                >
+                  Ã—
+                </button>
+              )}
+            </div>
+            <div className="filter-tabs">
+              {['All', 'Active', 'Locked', 'Disabled'].map(f => (
+                <button key={f} className={`filter-tab ${filter === f ? 'active' : ''}`} onClick={() => setFilter(f)}>
+                  {f}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
+
+        {relayError && (
+          <div style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)', color: 'var(--danger)', borderRadius: '8px', padding: '10px 16px', margin: '0 0 12px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.88rem' }}>
+            <span>⚠️ {relayError}</span>
+            <button onClick={() => setRelayError(null)} style={{ background: 'transparent', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: '1.1rem', lineHeight: 1 }}>Ã—</button>
+          </div>
+        )}
 
         <table className="data-table">
           <thead>
@@ -169,8 +612,6 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
               <th>Squad Virtual Account</th>
               <th>Naira Balance</th>
               <th>Meter Live Telemetry</th>
-              <th>DOB</th>
-              <th>Gender</th>
               <th>Energy Remaining</th>
               <th>Actions</th>
             </tr>
@@ -184,130 +625,269 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
               const generatorCapacityKw = parseFloat((sys.generatorCapacity || '2KV').replace(/[^0-9.]/g, '')) || 2;
               const maxCapacityKwh = generatorCapacityKw * 100; // display scale
               const percent = Math.min((remaining / Math.max(totalBought, 1)) * 100, 100).toFixed(0);
-              const isDiscounted = sys.cumulativeKwhConsumed >= 500;
-              
-              return (
-                <tr key={sys.id}>
-                  {/* Device Info */}
-                  <td>
-                    <div className="device-name">{sys.ownerName || 'Unknown Unit'}</div>
-                    <div className="device-id">{sys.hardwareId}</div>
-                    {sys.stronMeterId && (
-                      <div style={{ fontSize: '0.8rem', color: 'var(--primary-accent)', marginTop: '4px', fontFamily: 'monospace' }}>
-                        Meter: {sys.stronMeterId}
-                      </div>
-                    )}
-                    {sys.generatorCapacity && (
-                      <div style={{ marginTop: '4px' }}>
-                        <span style={{ background: 'rgba(250,200,50,0.12)', color: '#f5c842', padding: '2px 7px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold', fontFamily: 'monospace' }}>
-                          ⚡ {sys.generatorCapacity} Generator
-                        </span>
-                      </div>
-                    )}
-                  </td>
-                  
-                  {/* Virtual Account details */}
-                  <td>
-                    {sys.virtualAccountNumber ? (
-                      <div>
-                        <div style={{ fontWeight: '600', fontSize: '0.9rem', color: '#3b82f6' }}>{sys.virtualAccountNumber}</div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{sys.virtualBankName}</div>
-                      </div>
-                    ) : (
-                      <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No VA Assigned</span>
-                    )}
-                  </td>
-
-                  {/* Cash Balance */}
-                  <td>
-                    <div style={{ fontSize: '1.05rem', fontWeight: 'bold', color: sys.prepaidNairaBalance > 0 ? 'var(--success)' : 'var(--danger)' }}>
-                      {formatNaira(sys.prepaidNairaBalance)}
-                    </div>
-                    {/* Tariff Label */}
-                    <div style={{ marginTop: '4px' }}>
-                      {isDiscounted ? (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: 'rgba(16,185,129,0.15)', color: 'var(--success)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold' }}>
-                          <BadgeCheck size={10} /> 50% Disc. (₦1,250/kWh)
-                        </span>
-                      ) : (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: 'rgba(255,255,255,0.03)', color: 'var(--text-muted)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.7rem' }}>
-                          Std. Tariff (₦2,500/kWh)
-                        </span>
-                      )}
-                    </div>
-                  </td>
-
-                  {/* Meter Live Telemetry */}
-                  <td>
-                    {sys.stronMeterId ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.8rem', fontFamily: 'monospace' }}>
-                        <div style={{ display: 'flex', gap: '8px', color: 'var(--text-main)' }}>
-                          <span>{sys.voltage?.toFixed(1) || '230.0'}V</span>
-                          <span>·</span>
-                          <span>{sys.current?.toFixed(2) || '0.00'}A</span>
-                          <span>·</span>
-                          <span style={{ color: 'var(--primary-accent)' }}>{sys.power?.toFixed(0) || '0'}W</span>
+              const plan = sys.pricePlan;
+              const loyaltyActive = plan
+                ? (plan.loyaltyDiscountEnabled && sys.cumulativeKwhConsumed >= plan.loyaltyThresholdKwh)
+                : (sys.cumulativeKwhConsumed >= 500);
+              const effectiveRate = plan
+                ? (loyaltyActive ? plan.pricePerKwh * (1 - plan.loyaltyDiscountPercent / 100) : plan.pricePerKwh)
+                : (loyaltyActive ? 1250 : 2500);
+              const isDiscounted = loyaltyActive;
+                         return (
+                <React.Fragment key={sys.id}>
+                  <tr 
+                    onClick={() => { 
+                      setExpandedSystemId(expandedSystemId === sys.id ? null : sys.id); 
+                      setStronTokenResult(null); 
+                    }} 
+                    style={{ cursor: 'pointer', background: expandedSystemId === sys.id ? 'rgba(255,255,255,0.02)' : '' }}
+                  >
+                    {/* Device Info */}
+                    <td>
+                      <div className="device-name">{sys.ownerName || 'Unknown Unit'}</div>
+                      <div className="device-id">{sys.hardwareId}</div>
+                      {sys.stronMeterId && (
+                        <div style={{ fontSize: '0.8rem', color: 'var(--primary-accent)', marginTop: '4px', fontFamily: 'monospace' }}>
+                          Meter: {sys.stronMeterId}
                         </div>
-                        <div style={{ display: 'flex', gap: '6px', marginTop: '2px' }}>
-                          {sys.relayState === "1" ? (
-                            <span style={{ background: 'rgba(16, 185, 129, 0.1)', color: 'var(--success)', padding: '1px 5px', borderRadius: '4px', fontSize: '0.7rem' }}>Relay Closed</span>
-                          ) : (
-                            <span style={{ background: 'rgba(239, 68, 68, 0.1)', color: 'var(--danger)', padding: '1px 5px', borderRadius: '4px', fontSize: '0.7rem' }}>Relay Open (Cut)</span>
-                          )}
+                      )}
+                      <div style={{ marginTop: '4px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                        {sys.generatorCapacity && (
+                          <span style={{ background: 'rgba(250,200,50,0.12)', color: '#f5c842', padding: '2px 7px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold', fontFamily: 'monospace' }}>
+                            ⚡ {sys.generatorCapacity}
+                          </span>
+                        )}
+                        {sys.deviceGroup ? (
+                          <span style={{ background: 'rgba(59,130,246,0.15)', color: '#3b82f6', padding: '2px 7px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold' }}>
+                            🏷️ {sys.deviceGroup.name}
+                          </span>
+                        ) : null}
+                      </div>
+                    </td>
+                    
+                    {/* Virtual Account details */}
+                    <td>
+                      {sys.virtualAccountNumber ? (
+                        <div>
+                          <div style={{ fontWeight: '600', fontSize: '0.9rem', color: '#3b82f6' }}>{sys.virtualAccountNumber}</div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{sys.virtualBankName}</div>
+                        </div>
+                      ) : (
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No VA Assigned</span>
+                      )}
+                    </td>
+
+                    {/* Cash Balance */}
+                    <td>
+                      <div style={{ fontSize: '1.05rem', fontWeight: 'bold', color: sys.prepaidNairaBalance > 0 ? 'var(--success)' : 'var(--danger)' }}>
+                        {formatNaira(sys.prepaidNairaBalance)}
+                      </div>
+                      {/* Pending Wallet - mirrors what the customer sees on their dashboard */}
+                      <div
+                        title="Money paid that hasn't converted into an energy token yet"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginTop: '5px', color: sys.pendingWalletBalance > 0 ? '#facc15' : 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 600 }}
+                      >
+                        <Coins size={12} /> Wallet: {formatNaira(sys.pendingWalletBalance)}
+                      </div>
+                      {/* Tariff Label */}
+                      <div style={{ marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                        {plan && (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: 'rgba(59,130,246,0.15)', color: '#3b82f6', padding: '2px 6px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 'bold', width: 'fit-content' }}>
+                            {plan.name || `Band ${plan.band}`}
+                          </span>
+                        )}
+                        {isDiscounted ? (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: 'rgba(16,185,129,0.15)', color: 'var(--success)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold', width: 'fit-content' }}>
+                            <BadgeCheck size={10} /> {plan ? `${plan.loyaltyDiscountPercent}% Disc.` : '50% Disc.'} (₦{effectiveRate.toFixed(0)}/kWh)
+                          </span>
+                        ) : (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', background: 'rgba(255,255,255,0.03)', color: 'var(--text-muted)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.7rem', width: 'fit-content' }}>
+                            Std. Tariff (₦{effectiveRate.toFixed(0)}/kWh)
+                          </span>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Meter Live Telemetry */}
+                    <td>
+                      {sys.stronMeterId ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.8rem', fontFamily: 'monospace' }}>
+                          <div style={{ display: 'flex', gap: '8px', color: 'var(--text-main)' }}>
+                            <span>{sys.voltage?.toFixed(1) || '0.0'}V</span>
+                            <span>Â·</span>
+                            <span>{sys.current?.toFixed(2) || '0.00'}A</span>
+                            <span>Â·</span>
+                            <span style={{ color: 'var(--primary-accent)' }}>{sys.power?.toFixed(0) || '0'}W</span>
+                          </div>
+                          <div style={{ display: 'flex', gap: '6px', marginTop: '2px' }}>
+                            {sys.relayState === "1" ? (
+                              <span style={{ background: 'rgba(16, 185, 129, 0.1)', color: 'var(--success)', padding: '1px 5px', borderRadius: '4px', fontSize: '0.7rem' }}>Relay Closed</span>
+                            ) : (
+                              <span style={{ background: 'rgba(239, 68, 68, 0.1)', color: 'var(--danger)', padding: '1px 5px', borderRadius: '4px', fontSize: '0.7rem' }}>Relay Open (Cut)</span>
+                            )}
+                            
+                            {sys.coverState === "1" && (
+                              <span style={{ background: 'rgba(245, 158, 11, 0.15)', color: 'var(--warning)', padding: '1px 5px', borderRadius: '4px', fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '2px' }}>
+                                <ShieldAlert size={10} /> Tamper
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Telemetry Offline</span>
+                      )}
+                    </td>
+
+                    {/* Energy units Remaining */}
+                    <td>
+                      <div className="progress-container">
+                        <div className="progress-track">
+                          <div className={`progress-fill ${s}`} style={{ width: `${percent}%` }}></div>
+                        </div>
+                        <div className="progress-text" style={{ color: remaining > 0 ? 'var(--success)' : 'var(--danger)' }}>
+                          {remaining.toFixed(2)} kWh remaining
+                        </div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                          <span>📥 Bought: <strong>{totalBought.toFixed(2)} kWh</strong></span>
+                          <span>📤 Used: <strong>{totalUsed.toFixed(2)} kWh</strong></span>
+                        </div>
+                      </div>
+                    </td>
+
+                    {/* Row actions */}
+                    <td>
+                      <div className="action-buttons" style={{ display: 'flex', gap: '8px' }}>
+                        {relayLoading === sys.id ? (
+                          <button className="action-btn" style={{ padding: '6px 12px', opacity: 0.6 }} disabled>
+                            ⏳ Sending...
+                          </button>
+                        ) : sys.relayState === '0' || sys.RelayState === '0' ? (
+                          <button onClick={(e) => { e.stopPropagation(); handleToggleState(sys.id, 'relay-on'); }} className="action-btn unlock" style={{ padding: '6px 12px' }}>
+                            <Unlock size={14} /> Close Relay
+                          </button>
+                        ) : (
+                          <button onClick={(e) => { e.stopPropagation(); handleToggleState(sys.id, 'relay-off'); }} className="action-btn disable" style={{ padding: '6px 12px' }}>
+                            <MinusCircle size={14} /> Lock Relay
+                          </button>
+                        )}
+                        
+                        <button 
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            setExpandedSystemId(expandedSystemId === sys.id ? null : sys.id); 
+                            setStronTokenResult(null); 
+                          }} 
+                          className="action-btn" 
+                          style={{ padding: '6px 12px', background: expandedSystemId === sys.id ? 'var(--primary-accent)' : 'rgba(255,255,255,0.03)', borderColor: expandedSystemId === sys.id ? 'var(--primary-accent)' : 'var(--border-color)', color: expandedSystemId === sys.id ? 'var(--bg-dark)' : 'white' }}
+                        >
+                          ⚙️ Manage Stron
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+
+                  {expandedSystemId === sys.id && (
+                    <tr style={{ background: 'rgba(255, 255, 255, 0.02)' }}>
+                      <td colSpan="6" style={{ padding: '20px', borderTop: '1px solid var(--border-color)', borderBottom: '1px solid var(--border-color)' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '24px' }}>
                           
-                          {sys.coverState === "1" && (
-                            <span style={{ background: 'rgba(245, 158, 11, 0.15)', color: 'var(--warning)', padding: '1px 5px', borderRadius: '4px', fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '2px' }}>
-                              <ShieldAlert size={10} /> Tamper
-                            </span>
-                          )}
+                          {/* Stron Remote Operations */}
+                          <div>
+                            <h4 style={{ color: 'white', marginBottom: '16px', fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              ⚡ Hunan Stron AMI Smart Meter Commands
+                            </h4>
+                            
+                            <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
+                              <button 
+                                onClick={() => handleAdminAction(sys.id, 'clear-tamper')}
+                                disabled={adminActionLoading}
+                                className="action-btn" 
+                                style={{ flex: 1, padding: '10px', background: 'rgba(245, 158, 11, 0.12)', color: 'var(--warning)', borderColor: 'rgba(245, 158, 11, 0.4)' }}
+                              >
+                                {adminActionLoading ? '⏳ Processing...' : 'Clear Tamper State'}
+                              </button>
+                              
+                              <button 
+                                onClick={() => {
+                                  if (confirm(`Are you sure you want to completely reset all credit on the physical meter and database for system ${sys.hardwareId}? This will lock the system and reset the balance to 0.`)) {
+                                    handleAdminAction(sys.id, 'clear-credit');
+                                  }
+                                }}
+                                disabled={adminActionLoading}
+                                className="action-btn" 
+                                style={{ flex: 1, padding: '10px', background: 'rgba(239, 68, 68, 0.12)', color: 'var(--danger)', borderColor: 'rgba(239, 68, 68, 0.4)' }}
+                              >
+                                {adminActionLoading ? '⏳ Processing...' : 'Clear Credit (Reset)'}
+                              </button>
+                            </div>
+
+                            {/* Token result display */}
+                            {stronTokenResult && (
+                              <div style={{ background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.4)', borderRadius: '6px', padding: '12px', marginBottom: '16px' }}>
+                                <div style={{ fontSize: '0.85rem', color: 'var(--success)', fontWeight: 'bold', marginBottom: '4px' }}>{stronTokenResult.message}</div>
+                                {stronTokenResult.token && (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '8px' }}>
+                                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>STS 20-Digit Keypad Code:</span>
+                                    <strong style={{ fontFamily: 'monospace', fontSize: '1.2rem', color: 'var(--primary-accent)', letterSpacing: '1px' }}>
+                                      {stronTokenResult.token}
+                                    </strong>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Transmit Custom Token */}
+                            <div style={{ marginTop: '12px' }}>
+                              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Transmit Custom STS Token (Remote OTA to Meter)</label>
+                              <div style={{ display: 'flex', gap: '8px' }}>
+                                <input 
+                                  type="text" 
+                                  value={manualToken} 
+                                  onChange={(e) => setManualToken(e.target.value)} 
+                                  placeholder="e.g. 2043 2769 0230 2834 8888" 
+                                  style={{ flex: 1, padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontFamily: 'monospace' }}
+                                />
+                                <button 
+                                  onClick={() => {
+                                    if (manualToken) {
+                                      handleAdminAction(sys.id, 'send-token', { token: manualToken });
+                                      setManualToken('');
+                                    }
+                                  }}
+                                  disabled={adminActionLoading || !manualToken}
+                                  className="action-btn"
+                                  style={{ padding: '8px 16px', background: 'var(--primary-accent)', color: 'var(--bg-dark)', borderColor: 'var(--primary-accent)' }}
+                                >
+                                  Send Token
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Meter Diagnostics Column */}
+                          <div style={{ borderLeft: '1px solid var(--border-color)', paddingLeft: '24px' }}>
+                            <h4 style={{ color: 'white', marginBottom: '16px', fontSize: '0.95rem' }}>📋 Live Telemetry Diagnostics</h4>
+                            <div style={{ background: 'var(--bg-dark)', padding: '12px', borderRadius: '6px', fontSize: '0.8rem', fontFamily: 'monospace', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                              <div><span style={{ color: 'white' }}>Meter Status:</span> {sys.meterOnline || sys.MeterOnline ? '🟢 Online (Connected)' : '🔴 Offline (Unreachable)'}</div>
+                              <div><span style={{ color: 'white' }}>Physical Switch (Relay):</span> {sys.relayState === '1' ? 'Closed (Power ON)' : 'Open (Power OFF)'}</div>
+                              <div><span style={{ color: 'white' }}>Cover State (Tamper):</span> {sys.coverState === '1' ? '⚠️ TAMPER ACTIVE (OPEN)' : 'Normal'}</div>
+                              <div><span style={{ color: 'white' }}>Voltage / Current:</span> {sys.voltage?.toFixed(1) || '0.0'} V / {sys.current?.toFixed(2) || '0.00'} A</div>
+                              <div><span style={{ color: 'white' }}>Active Load Draw:</span> {sys.power?.toFixed(0) || '0'} W (Max: {sys.maxLoadWatts || 2000} W)</div>
+                              <div><span style={{ color: 'white' }}>Cumulative Consumption:</span> {totalUsed.toFixed(2)} kWh</div>
+                              <div><span style={{ color: 'white' }}>Customer Phone/Email:</span> {sys.customerPhone || 'N/A'} / {sys.customerEmail || 'N/A'}</div>
+                              <div><span style={{ color: 'white' }}>Last Sync Time:</span> {sys.lastSyncTime ? new Date(sys.lastSyncTime).toLocaleString() : 'Never'}</div>
+                            </div>
+                          </div>
+
                         </div>
-                      </div>
-                    ) : (
-                      <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Telemetry Offline</span>
-                    )}
-                  </td>
-
-                  {/* DOB */}
-                  <td>{sys.customerDob ? new Date(sys.customerDob).toLocaleDateString() : 'N/A'}</td>
-                  
-                  {/* Gender */}
-                  <td>{sys.customerGender === "1" ? "Male" : sys.customerGender === "2" ? "Female" : "Other"}</td>
-                  
-                  {/* Energy units Remaining */}
-                  <td>
-                    <div className="progress-container">
-                      <div className="progress-track">
-                        <div className={`progress-fill ${s}`} style={{ width: `${percent}%` }}></div>
-                      </div>
-                      <div className="progress-text" style={{ color: remaining > 0 ? 'var(--success)' : 'var(--danger)' }}>
-                        {remaining.toFixed(2)} kWh remaining
-                      </div>
-                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '1px' }}>
-                        <span>📥 Bought: <strong>{totalBought.toFixed(2)} kWh</strong></span>
-                        <span>📤 Used: <strong>{totalUsed.toFixed(2)} kWh</strong></span>
-                      </div>
-                    </div>
-                  </td>
-
-                  {/* Row actions */}
-                  <td>
-                    <div className="action-buttons">
-                      {sys.status === "Locked" ? (
-                        <button onClick={() => handleToggleState(sys.id, 'enable')} className="action-btn unlock" style={{ padding: '6px 12px' }}>
-                          <Unlock size={14} /> Unlock
-                        </button>
-                      ) : (
-                        <button onClick={() => handleToggleState(sys.id, 'disable')} className="action-btn disable" style={{ padding: '6px 12px' }}>
-                          <MinusCircle size={14} /> Lock Relay
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
               );
             })}
             {filteredSystems.length === 0 && !loading && (
-              <tr><td colSpan="8" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px' }}>No systems match filter.</td></tr>
+              <tr><td colSpan="6" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px' }}>No systems match filter.</td></tr>
             )}
           </tbody>
         </table>
@@ -338,124 +918,679 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
           {(!(summary.recentPayments || summary.RecentPayments) || (summary.recentPayments || summary.RecentPayments).length === 0) && !loading && (
             <div style={{ color: 'var(--text-muted)', padding: '20px' }}>No recent payments today.</div>
           )}
+          </div>
         </div>
       </div>
 
+      )}
+
+      {activeView === 'customers' && (
+        /* CUSTOMERS & TRANSACTIONS DATABASE VIEW */
+        <div className="glass-panel" style={{ width: '100%' }}>
+          {/* Device Group / Tab Selector */}
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', overflowX: 'auto', paddingBottom: '8px', borderBottom: '1px solid var(--border-color)', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', fontWeight: 'bold', marginRight: '4px' }}>
+              🏷️ Group Tabs:
+            </span>
+            <button
+              className={`filter-tab ${selectedGroupTab === 'All' ? 'active' : ''}`}
+              onClick={() => setSelectedGroupTab('All')}
+              style={{ fontSize: '0.82rem', padding: '6px 14px' }}
+            >
+              All Groups ({systems.length})
+            </button>
+            {deviceGroups.map(g => {
+              const count = systems.filter(s => s.deviceGroupId === g.id || (s.deviceGroup && s.deviceGroup.name === g.name)).length;
+              return (
+                <button
+                  key={g.id}
+                  className={`filter-tab ${selectedGroupTab === g.name ? 'active' : ''}`}
+                  onClick={() => setSelectedGroupTab(g.name)}
+                  style={{ fontSize: '0.82rem', padding: '6px 14px' }}
+                >
+                  {g.name} ({count})
+                </button>
+              );
+            })}
+            <button
+              className={`filter-tab ${selectedGroupTab === 'Ungrouped' ? 'active' : ''}`}
+              onClick={() => setSelectedGroupTab('Ungrouped')}
+              style={{ fontSize: '0.82rem', padding: '6px 14px' }}
+            >
+              Ungrouped ({systems.filter(s => !s.deviceGroupId && !s.deviceGroup).length})
+            </button>
+          </div>
+
+          <div className="panel-header" style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
+            <h2>Registered Customers &amp; Account Information {selectedGroupTab !== 'All' ? `(${selectedGroupTab})` : ''}</h2>
+            <div style={{ position: 'relative', width: '280px' }}>
+              <Search size={15} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <input
+                type="text"
+                placeholder="Search name, email, phone, meter..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '7px 28px 7px 32px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--border-color)',
+                  background: 'rgba(255,255,255,0.04)',
+                  color: 'white',
+                  fontSize: '0.84rem',
+                  outline: 'none'
+                }}
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm('')}
+                  style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1rem', lineHeight: 1 }}
+                >
+                  Ã—
+                </button>
+              )}
+            </div>
+          </div>
+
+          {bandAssignError && (
+            <div style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)', color: 'var(--danger)', borderRadius: '8px', padding: '10px 16px', margin: '0 0 12px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.88rem' }}>
+              <span>⚠️ {bandAssignError}</span>
+              <button onClick={() => setBandAssignError(null)} style={{ background: 'transparent', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: '1.1rem', lineHeight: 1 }}>Ã—</button>
+            </div>
+          )}
+
+          {overloadNotice && (
+            <div style={{
+              background: overloadNotice.type === 'success' ? 'rgba(34, 197, 94, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+              border: `1px solid ${overloadNotice.type === 'success' ? 'rgba(34, 197, 94, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
+              color: overloadNotice.type === 'success' ? 'var(--success)' : 'var(--danger)',
+              borderRadius: '8px',
+              padding: '10px 16px',
+              marginBottom: '14px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              fontSize: '0.88rem'
+            }}>
+              <span>{overloadNotice.type === 'success' ? '✅' : '⚠️'} {overloadNotice.text}</span>
+              <button onClick={() => setOverloadNotice(null)} style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '1.2rem', lineHeight: 1 }}>Ã—</button>
+            </div>
+          )}
+
+          {adminPasswordNotice && (
+            <div style={{
+              background: adminPasswordNotice.type === 'success' ? 'rgba(34, 197, 94, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+              border: `1px solid ${adminPasswordNotice.type === 'success' ? 'rgba(34, 197, 94, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
+              color: adminPasswordNotice.type === 'success' ? 'var(--success)' : 'var(--danger)',
+              borderRadius: '8px',
+              padding: '10px 16px',
+              marginBottom: '14px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              fontSize: '0.88rem'
+            }}>
+              <span>{adminPasswordNotice.type === 'success' ? '🔑' : '⚠️'} {adminPasswordNotice.text}</span>
+              <button onClick={() => setAdminPasswordNotice(null)} style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '1.2rem', lineHeight: 1 }}>Ã—</button>
+            </div>
+          )}
+          <div className="table-responsive">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Customer Name & Contact</th>
+                  <th>System & Meter Profile</th>
+                  <th>Meter Status & Relay</th>
+                  <th>Squad Virtual Account</th>
+                  <th>Naira Balance</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {customerFilteredSystems.map(sys => {
+                  const txs = customerTransactions[sys.id] || [];
+                  const txsLoading = loadingTransactions[sys.id];
+                  const isExpanded = expandedCustomerId === sys.id;
+
+                  return (
+                    <React.Fragment key={sys.id}>
+                      <tr 
+                        onClick={() => {
+                          if (isExpanded) {
+                            setExpandedCustomerId(null);
+                          } else {
+                            setExpandedCustomerId(sys.id);
+                            fetchCustomerTransactions(sys.id);
+                          }
+                        }}
+                        style={{ cursor: 'pointer', background: isExpanded ? 'rgba(255,255,255,0.02)' : '' }}
+                      >
+                        {/* Name & Contact */}
+                        <td>
+                          <div style={{ fontWeight: 'bold', color: 'white', fontSize: '0.95rem' }}>{sys.ownerName || 'Unnamed Customer'}</div>
+                          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <span>📧 {sys.customerEmail || 'No Email'}</span>
+                            <span>📞 {sys.customerPhone || 'No Phone'}</span>
+                          </div>
+                        </td>
+
+                        {/* System Identifiers */}
+                        <td>
+                          <div style={{ fontSize: '0.85rem', color: 'white', fontFamily: 'monospace' }}>HW ID: {sys.hardwareId}</div>
+                          {sys.stronMeterId && (
+                            <div style={{ fontSize: '0.8rem', color: 'var(--primary-accent)', marginTop: '4px', fontFamily: 'monospace' }}>
+                              Meter ID: {sys.stronMeterId}
+                            </div>
+                          )}
+                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
+                            {sys.generatorCapacity && (
+                              <span style={{ background: 'rgba(250,200,50,0.1)', color: '#f5c842', padding: '2px 6px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 'bold' }}>
+                                ⚡ {sys.generatorCapacity} Generator
+                              </span>
+                            )}
+                            {sys.deviceGroup ? (
+                              <span style={{ background: 'rgba(59,130,246,0.15)', color: '#3b82f6', padding: '2px 6px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 'bold' }}>
+                                🏷️ {sys.deviceGroup.name}
+                              </span>
+                            ) : null}
+                          </div>
+                        </td>
+
+                        {/* Meter Status & Relay */}
+                        <td>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '5px',
+                              padding: '2px 8px',
+                              borderRadius: '12px',
+                              fontSize: '0.75rem',
+                              fontWeight: 600,
+                              width: 'fit-content',
+                              background: (sys.meterOnline || sys.MeterOnline) ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)',
+                              color: (sys.meterOnline || sys.MeterOnline) ? 'var(--success)' : 'var(--danger)',
+                              border: `1px solid ${(sys.meterOnline || sys.MeterOnline) ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`
+                            }}>
+                              <span style={{
+                                width: '6px',
+                                height: '6px',
+                                borderRadius: '50%',
+                                background: (sys.meterOnline || sys.MeterOnline) ? 'var(--success)' : 'var(--danger)',
+                                display: 'inline-block'
+                              }}></span>
+                              {(sys.meterOnline || sys.MeterOnline) ? 'Online' : 'Offline'}
+                            </span>
+                            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                              <span style={{ color: sys.relayState === '1' ? 'var(--success)' : 'var(--danger)' }}>
+                                {sys.relayState === '1' ? '⚡ Relay ON' : '⭕ Relay Cut'}
+                              </span>
+                              {(sys.isOverloaded || sys.IsOverloaded) && (
+                                <span style={{
+                                  background: 'rgba(245, 158, 11, 0.18)',
+                                  color: '#f59e0b',
+                                  padding: '1px 6px',
+                                  borderRadius: '6px',
+                                  fontSize: '0.7rem',
+                                  fontWeight: 700,
+                                  border: '1px solid rgba(245, 158, 11, 0.4)'
+                                }}>
+                                  ⚠️ Overloaded
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Squad Account */}
+                        <td>
+                          {sys.virtualAccountNumber ? (
+                            <div>
+                              <div style={{ fontWeight: 'bold', fontSize: '0.9rem', color: '#3b82f6', fontFamily: 'monospace' }}>{sys.virtualAccountNumber}</div>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{sys.virtualBankName}</div>
+                            </div>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No VA Assigned</span>
+                          )}
+                        </td>
+
+                        {/* Cash Balance */}
+                        <td>
+                          <div style={{ fontSize: '1.05rem', fontWeight: 'bold', color: sys.prepaidNairaBalance > 0 ? 'var(--success)' : 'var(--danger)' }}>
+                            {formatNaira(sys.prepaidNairaBalance)}
+                          </div>
+                          {/* Pending Wallet - mirrors what the customer sees on their dashboard */}
+                          <div
+                            title="Money paid that hasn't converted into an energy token yet"
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginTop: '5px', color: sys.pendingWalletBalance > 0 ? '#facc15' : 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 600 }}
+                          >
+                            <Coins size={12} /> Wallet: {formatNaira(sys.pendingWalletBalance)}
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                            {sys.availableUnits?.toFixed(2)} kWh energy left
+                          </div>
+                        </td>
+
+                        {/* Actions */}
+                        <td>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            <button 
+                              className="action-btn" 
+                              style={{ 
+                                padding: '6px 12px', 
+                                background: isExpanded ? 'var(--primary-accent)' : 'rgba(255,255,255,0.03)', 
+                                borderColor: isExpanded ? 'var(--primary-accent)' : 'var(--border-color)', 
+                                color: isExpanded ? 'var(--bg-dark)' : 'white' 
+                              }}
+                            >
+                              {isExpanded ? 'Hide History' : 'View Profile & History'}
+                            </button>
+
+                            {(sys.isOverloaded || sys.IsOverloaded || sys.relayState === '0' || sys.RelayState === '0' || !(sys.meterOnline ?? sys.MeterOnline) || sys.status === 'Locked' || sys.Status === 'Locked') && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleAdminResetOverload(sys.id);
+                                }}
+                                disabled={adminResetLoading[sys.id]}
+                                className="action-btn"
+                                title="Switch meter power ON or reset overload cutoff"
+                                style={{
+                                  padding: '5px 10px',
+                                  background: 'rgba(245, 158, 11, 0.15)',
+                                  borderColor: 'rgba(245, 158, 11, 0.5)',
+                                  color: '#f59e0b',
+                                  fontWeight: 600,
+                                  fontSize: '0.75rem',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  gap: '4px'
+                                }}
+                              >
+                                <Power size={12} />
+                                {adminResetLoading[sys.id] ? 'Switching...' : 'Switch Power ON'}
+                              </button>
+                            )}
+
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleAdminResetPassword(sys);
+                              }}
+                              disabled={adminPasswordResetLoading[sys.id]}
+                              className="action-btn"
+                              title="Reset customer login password to default Hardware ID"
+                              style={{
+                                padding: '5px 10px',
+                                background: 'rgba(59, 130, 246, 0.12)',
+                                borderColor: 'rgba(59, 130, 246, 0.4)',
+                                color: '#60a5fa',
+                                fontWeight: 600,
+                                fontSize: '0.75rem',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '4px'
+                              }}
+                            >
+                              <Key size={12} />
+                              {adminPasswordResetLoading[sys.id] ? 'Resetting...' : 'Reset Password'}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+
+                      {/* EXPANDED PROFILE & HISTORY DETAILS */}
+                      {isExpanded && (
+                        <tr style={{ background: 'rgba(0, 0, 0, 0.2)' }}>
+                          <td colSpan="6" style={{ padding: '24px', borderTop: '1px solid var(--border-color)', borderBottom: '1px solid var(--border-color)' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '32px' }}>
+                              
+                              {/* Complete Profile Cards */}
+                              <div>
+                                <h3 style={{ color: 'white', marginBottom: '16px', fontSize: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  👤 Profile Details
+                                </h3>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '0.85rem' }}>
+                                  <div><strong style={{ color: 'var(--text-muted)' }}>Full Name:</strong> <span style={{ color: 'white' }}>{sys.ownerName}</span></div>
+                                  <div><strong style={{ color: 'var(--text-muted)' }}>Gender:</strong> <span style={{ color: 'white' }}>{sys.customerGender === '1' ? 'Male' : sys.customerGender === '2' ? 'Female' : 'Other'}</span></div>
+                                  <div><strong style={{ color: 'var(--text-muted)' }}>Date of Birth:</strong> <span style={{ color: 'white' }}>{sys.customerDob || 'N/A'}</span></div>
+                                  <div><strong style={{ color: 'var(--text-muted)' }}>BVN Number:</strong> <span style={{ color: 'white', letterSpacing: '1px' }}>{sys.customerBvn || 'N/A'}</span></div>
+                                  <div><strong style={{ color: 'var(--text-muted)' }}>Email Address:</strong> <span style={{ color: 'white' }}>{sys.customerEmail}</span></div>
+                                  <div><strong style={{ color: 'var(--text-muted)' }}>Phone Number:</strong> <span style={{ color: 'white' }}>{sys.customerPhone}</span></div>
+                                  <div><strong style={{ color: 'var(--text-muted)' }}>System Capacity:</strong> <span style={{ color: 'white' }}>{sys.generatorCapacity} ({sys.maxLoadWatts}W limit)</span></div>
+                                  <div>
+                                    <strong style={{ color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Device Group / Tab:</strong>
+                                    <select
+                                      value={sys.deviceGroupId || ''}
+                                      disabled={groupAssignLoading === sys.id}
+                                      onChange={(e) => handleAssignGroup(sys.id, e.target.value)}
+                                      onClick={(e) => e.stopPropagation()}
+                                      style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.85rem' }}
+                                    >
+                                      <option value="">No Group — Ungrouped</option>
+                                      {deviceGroups.map(g => (
+                                        <option key={g.id} value={g.id}>{g.name}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <strong style={{ color: 'var(--text-muted)' }}>Pending Wallet:</strong> <span style={{ color: 'white' }}>{formatNaira(sys.pendingWalletBalance)}</span> <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>(not yet converted to units)</span>
+                                    {sys.pendingWalletBalance > 0 && (
+                                      <div style={{ marginTop: '6px' }}>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleAdminAction(sys.id, 'redeem-wallet');
+                                          }}
+                                          disabled={adminActionLoading}
+                                          style={{
+                                            padding: '6px 12px',
+                                            borderRadius: '6px',
+                                            background: 'rgba(250, 204, 21, 0.15)',
+                                            border: '1px solid rgba(250, 204, 21, 0.5)',
+                                            color: '#facc15',
+                                            fontSize: '0.8rem',
+                                            fontWeight: 600,
+                                            cursor: 'pointer',
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '6px'
+                                          }}
+                                        >
+                                          <Coins size={14} />
+                                          {adminActionLoading ? 'Redeeming & Vending...' : `Redeem & Vend to Meter (${formatNaira(sys.pendingWalletBalance)})`}
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div>
+                                    <strong style={{ color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>Price Band:</strong>
+                                    <select
+                                      value={sys.pricePlanId || ''}
+                                      disabled={bandAssignLoading === sys.id}
+                                      onChange={(e) => handleAssignBand(sys.id, e.target.value)}
+                                      onClick={(e) => e.stopPropagation()}
+                                      style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.85rem' }}
+                                    >
+                                      <option value="">No band — standard pricing</option>
+                                      {pricePlans.map(p => (
+                                        <option key={p.id} value={p.id}>{p.name || `Band ${p.band}`} — ₦{p.pricePerKwh}/kWh</option>
+                                      ))}
+                                    </select>
+                                    {bandAssignLoading === sys.id && (
+                                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Saving...</span>
+                                    )}
+                                  </div>
+
+                                  <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                    <strong style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Customer Login &amp; Password:</strong>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleAdminResetPassword(sys);
+                                        }}
+                                        disabled={adminPasswordResetLoading[sys.id]}
+                                        style={{
+                                          padding: '7px 14px',
+                                          borderRadius: '6px',
+                                          background: 'rgba(59, 130, 246, 0.15)',
+                                          border: '1px solid rgba(59, 130, 246, 0.5)',
+                                          color: '#93c5fd',
+                                          fontSize: '0.82rem',
+                                          fontWeight: 600,
+                                          cursor: 'pointer',
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '6px'
+                                        }}
+                                      >
+                                        <Key size={14} />
+                                        {adminPasswordResetLoading[sys.id] ? 'Resetting Password...' : `Reset Password to Default (${sys.hardwareId})`}
+                                      </button>
+                                      <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                                        Restores customer login password back to default Hardware ID.
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Payment history */}
+                              <div>
+                                <h3 style={{ color: 'white', marginBottom: '16px', fontSize: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  💳 Transaction & STS Token History
+                                </h3>
+                                {txsLoading ? (
+                                  <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', padding: '20px 0' }}>⏳ Fetching records from payment gateway...</div>
+                                ) : txs.length === 0 ? (
+                                  <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', padding: '20px 0' }}>No transactions recorded for this customer.</div>
+                                ) : (
+                                  <div style={{ maxHeight: '250px', overflowY: 'auto' }}>
+                                    <table style={{ width: '100%', fontSize: '0.8rem', borderCollapse: 'collapse', textAlign: 'left' }}>
+                                      <thead>
+                                        <tr style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-color)' }}>
+                                          <th style={{ padding: '8px' }}>Date</th>
+                                          <th style={{ padding: '8px' }}>Amount Paid</th>
+                                          <th style={{ padding: '8px' }}>Used Amount</th>
+                                          <th style={{ padding: '8px' }}>Units Credited</th>
+                                          <th style={{ padding: '8px' }}>Added to Wallet</th>
+                                          <th style={{ padding: '8px' }}>Wallet Total</th>
+                                          <th style={{ padding: '8px' }}>Generated STS Token</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {txs.map((tx, idx) => (
+                                          <tr key={tx.id || idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                                            <td style={{ padding: '8px', color: 'var(--text-muted)' }}>{new Date(tx.transactionDate).toLocaleString()}</td>
+                                            <td style={{ padding: '8px', fontWeight: 'bold', color: 'var(--success)' }}>{formatNaira(tx.amountPaid)}</td>
+                                            {/* A dash, not a zero, where the split was never recorded. Older
+                                                transactions predate it being kept, and showing 0 would read as
+                                                "none of this bought units", which is a different claim entirely. */}
+                                            <td style={{ padding: '8px', color: 'var(--text-muted)' }}>
+                                              {tx.usedAmount != null ? formatNaira(tx.usedAmount) : ' — '}
+                                            </td>
+                                            <td style={{ padding: '8px', color: 'white' }}>{tx.unitsAdded?.toFixed(2)} kWh</td>
+                                            <td style={{ padding: '8px', color: tx.addedToWallet ? 'var(--primary-accent)' : 'var(--text-muted)' }}>
+                                              {tx.addedToWallet != null ? formatNaira(tx.addedToWallet) : ' — '}
+                                            </td>
+                                            <td style={{ padding: '8px', color: 'var(--text-muted)' }}>
+                                              {tx.walletBalanceAfter != null ? formatNaira(tx.walletBalanceAfter) : ' — '}
+                                            </td>
+                                            <td style={{ padding: '8px', fontFamily: 'monospace', color: 'var(--primary-accent)', fontWeight: 'bold' }}>{tx.stsToken || 'OTA Sent'}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                              </div>
+
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+                {systems.length === 0 && (
+                  <tr><td colSpan="6" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px' }}>No registered customers found.</td></tr>
+                )}
+                {customerFilteredSystems.length === 0 && !loading && (
+                  <tr><td colSpan="6" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px' }}>No customers match the current group or search filter.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {activeView === 'investors' && (
+        <InvestorAdminSection formatNaira={formatNaira} />
+      )}
+
       {/* REGISTRATION MODAL */}
       {isRegisterOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.7)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '20px' }}>
-          <div className="glass-panel" style={{ width: '100%', maxWidth: '600px', margin: 0, maxHeight: '90vh', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
-              <h2 style={{ fontSize: '1.25rem', color: 'white', margin: 0 }}>Register New Prepaid Generator</h2>
-              <button onClick={() => setIsRegisterOpen(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '1.5rem', cursor: 'pointer' }}>&times;</button>
+        <div className="app-modal-backdrop">
+          <div className="app-modal-dialog">
+            <div className="app-modal-header">
+              <h2 style={{ fontSize: '1.25rem', color: 'white', margin: 0, fontWeight: 700 }}>Register New Prepaid Generator</h2>
+              <button 
+                type="button" 
+                onClick={() => setIsRegisterOpen(false)} 
+                className="app-modal-close-btn"
+                aria-label="Close"
+              >
+                &times;
+              </button>
             </div>
 
             {regError && (
-              <div style={{ background: 'var(--danger-bg)', color: 'var(--danger)', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '12px', borderRadius: '8px', marginBottom: '20px', fontSize: '0.9rem' }}>
+              <div style={{ background: 'var(--danger-bg)', color: 'var(--danger)', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontSize: '0.9rem' }}>
                 {regError}
               </div>
             )}
             
             {regSuccess && (
-              <div style={{ background: 'var(--success-bg)', color: 'var(--success)', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '12px', borderRadius: '8px', marginBottom: '20px', fontSize: '0.9rem', textAlign: 'center' }}>
+              <div style={{ background: 'var(--success-bg)', color: 'var(--success)', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontSize: '0.9rem', textAlign: 'center' }}>
                 Generator registered! Creating Squad Virtual Account...
               </div>
             )}
 
-            <form onSubmit={handleRegisterSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Hardware ID (System Serial)</label>
-                  <div style={{ position: 'relative' }}>
-                    <Activity size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
-                    <input required type="text" value={regHardwareId} onChange={(e) => setRegHardwareId(e.target.value.toUpperCase())} placeholder="e.g. SG-007" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white' }} />
-                  </div>
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Stron Smart Meter ID</label>
-                  <div style={{ position: 'relative' }}>
-                    <FileText size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
-                    <input required type="text" maxLength="12" value={regMeterId} onChange={(e) => setRegMeterId(e.target.value.replace(/\D/g, ''))} placeholder="e.g. 9013151606" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white' }} />
-                  </div>
-                </div>
-              </div>
+            {(() => {
+              const selectedCapObj = capacities.find(c => c.code === regGeneratorCapacity);
+              const selectedPct = selectedCapObj ? (selectedCapObj.overloadThresholdPercent || 90) : 90;
 
-              <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>⚡ Generator Capacity</label>
-                <select required value={regGeneratorCapacity} onChange={(e) => setRegGeneratorCapacity(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }}>
-                  <option value="1KV">1KV – Small (Residential, 1 room)</option>
-                  <option value="2KV">2KV – Medium (Standard Household)</option>
-                  <option value="3KV">3KV – Large (Small Business / Shop)</option>
-                  <option value="5KV">5KV – Extra Large (Commercial)</option>
-                  <option value="7.5KV">7.5KV – Heavy Duty</option>
-                  <option value="10KV">10KV – Industrial</option>
-                </select>
-                <span style={{ fontSize: '0.7rem', color: 'var(--warning)', marginTop: '4px', display: 'block' }}>⚠️ Load must not exceed 90% of this capacity or the relay will automatically trip off.</span>
-              </div>
+              return (
+                <form onSubmit={handleRegisterSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <div className="app-modal-grid-2">
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Hardware ID (System Serial)</label>
+                      <div style={{ position: 'relative' }}>
+                        <Activity size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
+                        <input required type="text" value={regHardwareId} onChange={(e) => setRegHardwareId(e.target.value.toUpperCase())} placeholder="e.g. SG-007" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }} />
+                      </div>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Stron Smart Meter ID</label>
+                      <div style={{ position: 'relative' }}>
+                        <FileText size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
+                        <input required type="text" maxLength="12" value={regMeterId} onChange={(e) => setRegMeterId(e.target.value.replace(/\D/g, ''))} placeholder="e.g. 9013151606" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }} />
+                      </div>
+                    </div>
+                  </div>
 
-              <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Owner Full Name</label>
-                <div style={{ position: 'relative' }}>
-                  <User size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
-                  <input required type="text" value={regOwnerName} onChange={(e) => setRegOwnerName(e.target.value)} placeholder="e.g. Olamide Johnson" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '1rem' }} />
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  <div className="app-modal-grid-2">
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>⚡ Generator Capacity</label>
+                      <select required value={regGeneratorCapacity} onChange={(e) => setRegGeneratorCapacity(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }}>
+                        {capacities.map(c => (
+                          <option key={c.id ?? c.code} value={c.code}>{c.code} – {c.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>🏷️ Tab/Group List</label>
+                      <select value={regDeviceGroupId} onChange={(e) => setRegDeviceGroupId(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }}>
+                        <option value="">No Group — Ungrouped</option>
+                        {deviceGroups.map(g => (
+                          <option key={g.id} value={g.id}>{g.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--warning)', marginTop: '-4px', display: 'block', lineHeight: '1.4' }}>⚠️ Load must not exceed {selectedPct}% of this capacity or the relay will automatically trip off.</span>
+
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Date of Birth</label>
+                    <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Price Band (optional)</label>
+                    <select value={regPricePlanId} onChange={(e) => setRegPricePlanId(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }}>
+                      <option value="">No band — standard pricing</option>
+                      {pricePlans.map(p => (
+                        <option key={p.id} value={p.id}>{p.name || `Band ${p.band}`} — ₦{p.pricePerKwh}/kWh</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="app-modal-grid-2">
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>First Name (as on BVN) *</label>
+                      <div style={{ position: 'relative' }}>
+                        <User size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
+                        <input required type="text" value={regFirstName} onChange={(e) => setRegFirstName(e.target.value)} placeholder="e.g. Francis" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }} />
+                      </div>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Surname / Last Name (as on BVN) *</label>
+                      <input required type="text" value={regLastName} onChange={(e) => setRegLastName(e.target.value)} placeholder="e.g. Philemon" style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }} />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Middle Name (optional)</label>
+                    <input type="text" value={regMiddleName} onChange={(e) => setRegMiddleName(e.target.value)} placeholder="Optional (e.g. John)" style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }} />
+                  </div>
+
+                  <div className="app-modal-grid-2">
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Date of Birth</label>
+                      <input type="date" value={regDob} onChange={(e) => setRegDob(e.target.value)} required style={{ width: '100%', padding: '11px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem', minHeight: '44px' }} />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Gender</label>
+                      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', minHeight: '44px' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.92rem', color: 'white', padding: '8px 14px', borderRadius: '8px', background: regGender === '1' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(255,255,255,0.04)', border: regGender === '1' ? '1px solid var(--primary-accent)' : '1px solid var(--border-color)', flex: 1, justifyContent: 'center', transition: 'all 0.2s' }}>
+                          <input type="radio" name="gender" value="1" checked={regGender === '1'} onChange={() => setRegGender('1')} style={{ accentColor: 'var(--primary-accent)', cursor: 'pointer' }} /> Male
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.92rem', color: 'white', padding: '8px 14px', borderRadius: '8px', background: regGender === '2' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(255,255,255,0.04)', border: regGender === '2' ? '1px solid var(--primary-accent)' : '1px solid var(--border-color)', flex: 1, justifyContent: 'center', transition: 'all 0.2s' }}>
+                          <input type="radio" name="gender" value="2" checked={regGender === '2'} onChange={() => setRegGender('2')} style={{ accentColor: 'var(--primary-accent)', cursor: 'pointer' }} /> Female
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="app-modal-grid-2">
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Customer Phone Number</label>
+                      <div style={{ position: 'relative' }}>
+                        <Phone size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
+                        <input required type="tel" value={regPhone} onChange={(e) => setRegPhone(e.target.value)} placeholder="e.g. 08123456787" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }} />
+                      </div>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Customer Email Address</label>
+                      <div style={{ position: 'relative' }}>
+                        <Mail size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
+                        <input required type="email" value={regEmail} onChange={(e) => setRegEmail(e.target.value)} placeholder="e.g. olamide@example.com" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Bank Verification Number (BVN)</label>
                     <div style={{ position: 'relative' }}>
-                      <input type="date" value={regDob} onChange={(e) => setRegDob(e.target.value)} required style={{ width: '100%', padding: '12px 12px 12px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white' }} />
+                      <BadgeCheck size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
+                      <input required type="text" maxLength="11" value={regBvn} onChange={(e) => setRegBvn(e.target.value.replace(/\D/g, ''))} placeholder="11-digit BVN for Squad profiling" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', letterSpacing: '2px', fontSize: '0.95rem' }} />
                     </div>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '4px', display: 'block', lineHeight: '1.4' }}>Note: BVN is strictly required by the Central Bank of Nigeria (CBN) to create dynamic payment virtual accounts.</span>
                   </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Gender</label>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <label>
-                        <input type="radio" name="gender" value="1" checked={regGender === '1'} onChange={() => setRegGender('1')} /> Male
-                      </label>
-                      <label>
-                        <input type="radio" name="gender" value="2" checked={regGender === '2'} onChange={() => setRegGender('2')} /> Female
-                      </label>
-                    </div>
-                  </div>
-                </div>
-              </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Customer Phone Number</label>
-                  <div style={{ position: 'relative' }}>
-                    <Phone size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
-                    <input required type="tel" value={regPhone} onChange={(e) => setRegPhone(e.target.value)} placeholder="e.g. 08123456787" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white' }} />
+                  <div className="app-modal-footer">
+                    <button type="button" onClick={() => setIsRegisterOpen(false)} className="action-btn" style={{ flex: 1, padding: '12px', minHeight: '44px' }} disabled={regLoading}>Cancel</button>
+                    <button type="submit" className="action-btn" style={{ flex: 1, padding: '12px', minHeight: '44px', background: 'var(--primary-accent)', color: 'var(--bg-dark)', borderColor: 'var(--primary-accent)', fontWeight: 600 }} disabled={regLoading}>
+                      {regLoading ? 'Registering & Profiling...' : 'Register Generator'}
+                    </button>
                   </div>
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Customer Email Address</label>
-                  <div style={{ position: 'relative' }}>
-                    <Mail size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
-                    <input required type="email" value={regEmail} onChange={(e) => setRegEmail(e.target.value)} placeholder="e.g. olamide@example.com" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white' }} />
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Bank Verification Number (BVN)</label>
-                <div style={{ position: 'relative' }}>
-                  <BadgeCheck size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
-                  <input required type="text" maxLength="11" value={regBvn} onChange={(e) => setRegBvn(e.target.value.replace(/\D/g, ''))} placeholder="11-digit BVN for Squad profiling" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', letterSpacing: '2px' }} />
-                </div>
-                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>Note: BVN is strictly required by the Central Bank of Nigeria (CBN) to create dynamic payment virtual accounts.</span>
-              </div>
-
-              <div style={{ display: 'flex', gap: '12px', marginTop: '16px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
-                <button type="button" onClick={() => setIsRegisterOpen(false)} className="action-btn" style={{ flex: 1, padding: '12px' }} disabled={regLoading}>Cancel</button>
-                <button type="submit" className="action-btn" style={{ flex: 1, padding: '12px', background: 'var(--primary-accent)', color: 'var(--bg-dark)', borderColor: 'var(--primary-accent)' }} disabled={regLoading}>
-                  {regLoading ? 'Registering & Profiling...' : 'Register Generator'}
-                </button>
-              </div>
-            </form>
+                </form>
+              );
+            })()}
           </div>
         </div>
       )}
     </div>
   );
 }
+
