@@ -1,4 +1,4 @@
-import InvestorAdminSection from '../components/InvestorAdminSection';
+﻿import InvestorAdminSection from '../components/InvestorAdminSection';
 import React, { useState, useEffect } from 'react';
 import { Search, Lock, Unlock, MinusCircle, CreditCard, Plus, Activity, User, ShieldAlert, BadgeCheck, Phone, Mail, FileText, Coins, Power, Key } from 'lucide-react';
 import { BASE_URL } from '../config';
@@ -15,6 +15,9 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [regHardwareId, setRegHardwareId] = useState('');
   const [regOwnerName, setRegOwnerName] = useState('');
+  const [regFirstName, setRegFirstName] = useState('');
+  const [regMiddleName, setRegMiddleName] = useState('');
+  const [regLastName, setRegLastName] = useState('');
   const [regMeterId, setRegMeterId] = useState('');
   const [regEmail, setRegEmail] = useState('');
   const [regPhone, setRegPhone] = useState('');
@@ -159,7 +162,8 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
         const [y, m, d] = regDob.split('-');
         if (y && m && d) formattedDob = `${m.padStart(2, '0')}/${d.padStart(2, '0')}/${y}`;
       }
-const response = await fetch(`${BASE_URL}/dashboard/register`, {
+      const computedFullName = [regFirstName.trim(), regMiddleName.trim(), regLastName.trim()].filter(Boolean).join(' ') || regOwnerName.trim();
+      const response = await fetch(`${BASE_URL}/dashboard/register`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -168,7 +172,10 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
 
         body: JSON.stringify({
           hardwareId: regHardwareId.trim(),
-          ownerName: regOwnerName.trim(),
+          ownerName: computedFullName,
+          first_name: regFirstName.trim(),
+          last_name: regLastName.trim(),
+          middle_name: regMiddleName.trim(),
           stronMeterId: regMeterId.trim(),
           customerEmail: regEmail.trim(),
           customerPhone: regPhone.trim(),
@@ -185,6 +192,9 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
         setRegSuccess(true);
         setRegHardwareId('');
         setRegOwnerName('');
+        setRegFirstName('');
+        setRegMiddleName('');
+        setRegLastName('');
         setRegMeterId('');
         setRegEmail('');
         setRegPhone('');
@@ -1505,12 +1515,23 @@ const response = await fetch(`${BASE_URL}/dashboard/register`, {
                     </select>
                   </div>
 
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Owner Full Name</label>
-                    <div style={{ position: 'relative' }}>
-                      <User size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
-                      <input required type="text" value={regOwnerName} onChange={(e) => setRegOwnerName(e.target.value)} placeholder="e.g. Olamide Johnson" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }} />
+                  <div className="app-modal-grid-2">
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>First Name (as on BVN) *</label>
+                      <div style={{ position: 'relative' }}>
+                        <User size={16} style={{ position: 'absolute', left: '12px', top: '14px', color: 'var(--text-muted)' }} />
+                        <input required type="text" value={regFirstName} onChange={(e) => setRegFirstName(e.target.value)} placeholder="e.g. Francis" style={{ width: '100%', padding: '12px 12px 12px 38px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }} />
+                      </div>
                     </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Surname / Last Name (as on BVN) *</label>
+                      <input required type="text" value={regLastName} onChange={(e) => setRegLastName(e.target.value)} placeholder="e.g. Philemon" style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }} />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Middle Name (optional)</label>
+                    <input type="text" value={regMiddleName} onChange={(e) => setRegMiddleName(e.target.value)} placeholder="Optional (e.g. John)" style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }} />
                   </div>
 
                   <div className="app-modal-grid-2">

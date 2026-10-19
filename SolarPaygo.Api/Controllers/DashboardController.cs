@@ -492,19 +492,22 @@ namespace SolarPaygo.Api.Controllers
             // Generate dedicated Squad Virtual Account for bank transfer payments
             _logger.LogInformation("[Register] Registering customer and generating Squad virtual account for {OwnerName}", request.OwnerName);
             
+            string reqFirstName = !string.IsNullOrWhiteSpace(request.first_name) ? request.first_name.Trim() : GetFirstName(request.OwnerName);
+            string reqLastName = !string.IsNullOrWhiteSpace(request.last_name) ? request.last_name.Trim() : GetLastName(request.OwnerName);
+
             var squadAccount = await _squadService.CreateVirtualAccountAsync(
                 request.HardwareId,
-                GetFirstName(request.OwnerName),
-                GetLastName(request.OwnerName),
+                reqFirstName,
+                reqLastName,
                 request.CustomerEmail,
                 request.CustomerPhone,
                 request.CustomerBvn,
-                formattedDob,           // ✅ Safe parsed & formatted DOB
+                formattedDob,
                 request.CustomerAddress,
                 request.CustomerGender
             );
 
-            if (squadAccount == null || !string.IsNullOrEmpty(squadAccount.ErrorMessage))
+            if (squadAccount == null || !string.IsNullOrEmpty(squadAccount.ErrorMessage) || string.IsNullOrWhiteSpace(squadAccount.VirtualAccountNumber))
             {
                 bool useSandbox = _configuration.GetValue<bool>("Squad:UseSandbox");
                 if (useSandbox)
@@ -518,13 +521,11 @@ namespace SolarPaygo.Api.Controllers
                 }
                 else
                 {
-                    _logger.LogWarning("[Register] Squad Live Virtual Account generation failed ({Error}). Continuing onboarding with pending virtual account so customer is not blocked.", squadAccount?.ErrorMessage);
-                    squadAccount = new SquadVirtualAccountResponse
-                    {
-                        VirtualAccountNumber = string.Empty,
-                        BankName = "Pending Verification",
-                        ErrorMessage = squadAccount?.ErrorMessage
-                    };
+                    string err = !string.IsNullOrWhiteSpace(squadAccount?.ErrorMessage)
+                        ? squadAccount.ErrorMessage
+                        : "Failed to generate dynamic virtual account with Squad. Please ensure the First Name, Surname, Phone number, and Date of Birth match the customer's BVN records.";
+                    _logger.LogError("[Register] Squad Live Virtual Account generation failed: {Error}", err);
+                    return BadRequest($"Squad Virtual Account creation failed: {err}");
                 }
             }
 
