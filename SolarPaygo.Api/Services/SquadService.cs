@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Globalization;
@@ -139,6 +139,46 @@ namespace SolarPaygo.Api.Services
             }
         }
 
+        
+        public async Task<List<SquadMerchantTransactionItem>?> GetMerchantVirtualAccountTransactionsAsync()
+        {
+            var (apiKey, baseUrl, _, useSandbox) = GetConfig();
+            if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(baseUrl))
+            {
+                _logger.LogError("[Squad] Configuration error: ApiKey or BaseUrl is missing. Check appsettings.json.");
+                return null;
+            }
+
+            try
+            {
+                var request = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl.TrimEnd('/')}/virtual-account/merchant/transactions");
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+                var response = await _httpClient.SendAsync(request);
+                if (response.IsSuccessStatusCode)
+                {
+                    var json = await response.Content.ReadAsStringAsync();
+                    using var doc = JsonDocument.Parse(json);
+                    if (doc.RootElement.TryGetProperty("data", out var dataProp) && dataProp.ValueKind == JsonValueKind.Array)
+                    {
+                        var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                        var items = JsonSerializer.Deserialize<List<SquadMerchantTransactionItem>>(dataProp.GetRawText(), options);
+                        return items;
+                    }
+                }
+                else
+                {
+                    var err = await response.Content.ReadAsStringAsync();
+                    _logger.LogWarning("[Squad] Failed to fetch merchant virtual account transactions. Status={Status}, Body={Body}", response.StatusCode, err);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Squad] Exception fetching merchant virtual account transactions.");
+            }
+
+            return null;
+        }
         private (string ApiKey, string BaseUrl, string BeneficiaryAccount, bool UseSandbox) GetConfig()
         {
             bool useSandbox = _configuration.GetValue<bool>("Squad:UseSandbox");

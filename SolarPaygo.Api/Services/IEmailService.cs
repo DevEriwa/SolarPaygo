@@ -21,6 +21,13 @@ namespace SolarPaygo.Api.Services
 
         public async Task SendEmailAsync(string to, string subject, string body)
         {
+            bool emailEnabled = _configuration.GetValue<bool>("Email:Enabled", false);
+            if (!emailEnabled)
+            {
+                _logger.LogDebug("[Email] Email notification service is currently paused. Skipping email to {To}.", to);
+                return;
+            }
+
             var host = _configuration["Email:SmtpHost"] ?? "smtp.gmail.com";
             var port = int.Parse(_configuration["Email:SmtpPort"] ?? "587");
             var senderEmail = _configuration["Email:SenderEmail"] ?? string.Empty;
@@ -29,8 +36,8 @@ namespace SolarPaygo.Api.Services
 
             if (string.IsNullOrWhiteSpace(senderEmail) || string.IsNullOrWhiteSpace(password))
             {
-                _logger.LogError("[Email] SMTP credentials are not configured. Cannot send email to {To}.", to);
-                throw new InvalidOperationException("SMTP email credentials are not configured.");
+                _logger.LogInformation("[Email] SMTP credentials are not configured. Skipping email to {To}.", to);
+                return;
             }
 
             try
@@ -59,13 +66,11 @@ namespace SolarPaygo.Api.Services
             }
             catch (SmtpException ex)
             {
-                _logger.LogError(ex, "[Email] SMTP error sending email to {To} | Subject: {Subject} | StatusCode: {StatusCode}", to, subject, ex.StatusCode);
-                throw;
+                _logger.LogWarning("[Email] SMTP warning sending email to {To} | StatusCode: {StatusCode}: {Message}", to, ex.StatusCode, ex.Message);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "[Email] Unexpected error sending email to {To} | Subject: {Subject}", to, subject);
-                throw;
+                _logger.LogWarning("[Email] Warning sending email to {To}: {Message}", to, ex.Message);
             }
         }
     }

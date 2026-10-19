@@ -59,6 +59,8 @@ builder.Services.AddScoped<ISmsService, LoggingSmsService>();
 builder.Services.AddHostedService<DailyBillingResetService>();
 builder.Services.AddHostedService<TelemetrySyncService>();
 builder.Services.AddHostedService<LowBalanceMonitorService>();
+builder.Services.AddScoped<SolarPaygo.Api.Controllers.PaymentController>();
+builder.Services.AddHostedService<SquadPaymentSyncService>();
 
 builder.Services.AddSignalR();
 

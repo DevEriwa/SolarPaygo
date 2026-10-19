@@ -27,6 +27,7 @@ namespace SolarPaygo.Api.Controllers
         private readonly IEmailService _emailService;
         private readonly ISmsService _smsService;
         private readonly IHubContext<DashboardHub> _hubContext;
+        private readonly ISquadService _squadService;
 
         public PaymentController(
             SolarDbContext context, 
@@ -35,7 +36,8 @@ namespace SolarPaygo.Api.Controllers
             ILogger<PaymentController> logger,
             IEmailService emailService,
             ISmsService smsService,
-            IHubContext<DashboardHub> hubContext)
+            IHubContext<DashboardHub> hubContext,
+            ISquadService squadService)
         {
             _context = context;
             _vendingService = vendingService;
@@ -44,6 +46,7 @@ namespace SolarPaygo.Api.Controllers
             _emailService = emailService;
             _smsService = smsService;
             _hubContext = hubContext;
+            _squadService = squadService;
         }
 
         // 1. Squad Webhook Notification Handler
@@ -110,6 +113,91 @@ namespace SolarPaygo.Api.Controllers
                 _logger.LogError(ex, "[Webhook] Error processing Squad webhook");
                 return StatusCode(500, "Internal Server Error");
             }
+        }
+
+        
+        // 1b. Automatic / Manual Sync: Query Squad merchant virtual account transactions and credit any uncredited payments
+        [HttpPost("sync-squad-transactions")]
+        public async Task<IActionResult> SyncSquadTransactions()
+        {
+            var result = await SyncSquadTransactionsInternalAsync();
+            return Ok(result);
+        }
+
+        [HttpPost("verify-transaction/{reference}")]
+        public async Task<IActionResult> VerifyAndProcessTransaction(string reference)
+        {
+            if (string.IsNullOrWhiteSpace(reference)) return BadRequest("Transaction reference required.");
+
+            bool exists = await _context.Transactions.AnyAsync(t => t.PaymentReference == reference);
+            if (exists)
+            {
+                return Ok(new { success = true, message = "Transaction has already been processed previously." });
+            }
+
+            var transactions = await _squadService.GetMerchantVirtualAccountTransactionsAsync();
+            var tx = transactions?.FirstOrDefault(t => t.transaction_reference == reference);
+            if (tx == null)
+            {
+                return NotFound(new { success = false, message = "Transaction not found on Squad records." });
+            }
+
+            var result = await ProcessPaymentInternal(
+                tx.virtual_account_number ?? string.Empty,
+                tx.customer?.customer_identifier ?? string.Empty,
+                tx.principal_amount ?? "0",
+                tx.transaction_reference);
+
+            if (result.Success)
+            {
+                return Ok(new { success = true, message = "Payment successfully verified and credited.", data = result.Transaction });
+            }
+
+            return BadRequest(new { success = false, message = result.Message });
+        }
+
+        public async Task<object> SyncSquadTransactionsInternalAsync()
+        {
+            _logger.LogInformation("[SquadSync] Syncing Squad merchant virtual account transactions...");
+            var transactions = await _squadService.GetMerchantVirtualAccountTransactionsAsync();
+            if (transactions == null || transactions.Count == 0)
+            {
+                return new { success = true, processed = 0, message = "No transactions found on Squad." };
+            }
+
+            int processedCount = 0;
+            var processedRefs = new List<string>();
+
+            foreach (var tx in transactions)
+            {
+                if (string.IsNullOrWhiteSpace(tx.transaction_reference)) continue;
+
+                // Idempotency: Skip if already recorded in our database
+                bool exists = await _context.Transactions.AnyAsync(t => t.PaymentReference == tx.transaction_reference);
+                if (exists) continue;
+
+                var result = await ProcessPaymentInternal(
+                    tx.virtual_account_number ?? string.Empty,
+                    tx.customer?.customer_identifier ?? string.Empty,
+                    tx.principal_amount ?? "0",
+                    tx.transaction_reference);
+
+                if (result.Success)
+                {
+                    processedCount++;
+                    processedRefs.Add(tx.transaction_reference);
+                    _logger.LogInformation("[SquadSync] Synced and credited payment {Ref} for account {Account}, amount {Amount}",
+                        tx.transaction_reference, tx.virtual_account_number, tx.principal_amount);
+                }
+            }
+
+            return new
+            {
+                success = true,
+                processed = processedCount,
+                references = processedRefs,
+                message = $"Successfully synced and processed {processedCount} pending transactions from Squad."
+            };
         }
 
         // 2. Buy Units manually via UI (API fallback/Direct Payment Portal)
