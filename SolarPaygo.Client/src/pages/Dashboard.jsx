@@ -111,6 +111,30 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
   }, []);
   const [regPricePlanId, setRegPricePlanId] = useState('');
   const [regDeviceGroupId, setRegDeviceGroupId] = useState('');
+  const [regAgreementMonths, setRegAgreementMonths] = useState(12);
+  const [updatingMonths, setUpdatingMonths] = useState({});
+  const [monthSuccess, setMonthSuccess] = useState({});
+
+  const handleUpdateAgreementMonths = async (sysId, months) => {
+    setUpdatingMonths(prev => ({ ...prev, [sysId]: true }));
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${BASE_URL}/dashboard/systems/${sysId}/agreement-months`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agreementMonths: parseInt(months, 10) })
+      });
+      if (res.ok) {
+        setMonthSuccess(prev => ({ ...prev, [sysId]: 'Duration updated!' }));
+        setTimeout(() => setMonthSuccess(prev => ({ ...prev, [sysId]: null })), 3000);
+        if (typeof refreshData === 'function') refreshData();
+      }
+    } catch {
+      // silently handle
+    } finally {
+      setUpdatingMonths(prev => ({ ...prev, [sysId]: false }));
+    }
+  };
   const [deviceGroups, setDeviceGroups] = useState([]);
   const [selectedGroupTab, setSelectedGroupTab] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
@@ -213,7 +237,8 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
           customerGender: regGender,
           generatorCapacity: regGeneratorCapacity,
           pricePlanId: regPricePlanId ? parseInt(regPricePlanId, 10) : null,
-          deviceGroupId: regDeviceGroupId ? parseInt(regDeviceGroupId, 10) : null
+          deviceGroupId: regDeviceGroupId ? parseInt(regDeviceGroupId, 10) : null,
+          agreementMonths: regAgreementMonths ? parseInt(regAgreementMonths, 10) : 12
         })
       });
 
@@ -232,6 +257,7 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
         setRegGeneratorCapacity('2KV');
         setRegPricePlanId('');
         setRegDeviceGroupId('');
+        setRegAgreementMonths(12);
         refreshData();
         setTimeout(() => setIsRegisterOpen(false), 2000);
       } else {
@@ -917,7 +943,40 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
                               <div><span style={{ color: 'white' }}>Active Load Draw:</span> {sys.power?.toFixed(0) || '0'} W (Max: {sys.maxLoadWatts || 2000} W)</div>
                               <div><span style={{ color: 'white' }}>Cumulative Consumption:</span> {totalUsed.toFixed(2)} kWh</div>
                               <div><span style={{ color: 'white' }}>Customer Phone/Email:</span> {sys.customerPhone || 'N/A'} / {sys.customerEmail || 'N/A'}</div>
+                              <div><span style={{ color: 'white' }}>Agreement Duration:</span> {sys.agreementMonths || 12} Months</div>
                               <div><span style={{ color: 'white' }}>Last Sync Time:</span> {sys.lastSyncTime ? new Date(sys.lastSyncTime).toLocaleString() : 'Never'}</div>
+                            </div>
+
+                            <div style={{ marginTop: '12px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '10px 12px' }}>
+                              <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '6px' }}>📅 Edit Agreement Duration (Months)</label>
+                              <div style={{ display: 'flex', gap: '8px' }}>
+                                <select 
+                                  defaultValue={sys.agreementMonths || 12}
+                                  id={`agreement-months-${sys.id}`}
+                                  style={{ flex: 1, padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.85rem' }}
+                                >
+                                  <option value={6}>6 Months</option>
+                                  <option value={12}>12 Months (1 Year)</option>
+                                  <option value={18}>18 Months (1.5 Years)</option>
+                                  <option value={24}>24 Months (2 Years)</option>
+                                  <option value={36}>36 Months (3 Years)</option>
+                                  <option value={48}>48 Months (4 Years)</option>
+                                </select>
+                                <button
+                                  onClick={() => {
+                                    const sel = document.getElementById(`agreement-months-${sys.id}`);
+                                    if (sel) handleUpdateAgreementMonths(sys.id, sel.value);
+                                  }}
+                                  disabled={updatingMonths[sys.id]}
+                                  className="action-btn"
+                                  style={{ padding: '7px 12px', background: 'var(--primary-accent)', color: 'var(--bg-dark)', borderColor: 'var(--primary-accent)', fontSize: '0.8rem', fontWeight: 600 }}
+                                >
+                                  {updatingMonths[sys.id] ? 'Saving...' : 'Save'}
+                                </button>
+                              </div>
+                              {monthSuccess[sys.id] && (
+                                <div style={{ fontSize: '0.75rem', color: 'var(--success)', marginTop: '4px' }}>{monthSuccess[sys.id]}</div>
+                              )}
                             </div>
                           </div>
 
@@ -1588,14 +1647,27 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
                   </div>
                   <span style={{ fontSize: '0.72rem', color: 'var(--warning)', marginTop: '-4px', display: 'block', lineHeight: '1.4' }}>⚠️ Load must not exceed {selectedPct}% of this capacity or the relay will automatically trip off.</span>
 
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Price Band (optional)</label>
-                    <select value={regPricePlanId} onChange={(e) => setRegPricePlanId(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }}>
-                      <option value="">No band — standard pricing</option>
-                      {pricePlans.map(p => (
-                        <option key={p.id} value={p.id}>{p.name || `Band ${p.band}`} — ₦{p.pricePerKwh}/kWh</option>
-                      ))}
-                    </select>
+                  <div className="app-modal-grid-2">
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>Price Band (optional)</label>
+                      <select value={regPricePlanId} onChange={(e) => setRegPricePlanId(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }}>
+                        <option value="">No band — standard pricing</option>
+                        {pricePlans.map(p => (
+                          <option key={p.id} value={p.id}>{p.name || `Band ${p.band}`} — ₦{p.pricePerKwh}/kWh</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>📅 Agreement Duration (Months)</label>
+                      <select value={regAgreementMonths} onChange={(e) => setRegAgreementMonths(parseInt(e.target.value, 10))} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.95rem' }}>
+                        <option value={6}>6 Months</option>
+                        <option value={12}>12 Months (1 Year - Default)</option>
+                        <option value={18}>18 Months (1.5 Years)</option>
+                        <option value={24}>24 Months (2 Years)</option>
+                        <option value={36}>36 Months (3 Years)</option>
+                        <option value={48}>48 Months (4 Years)</option>
+                      </select>
+                    </div>
                   </div>
 
                   <div className="app-modal-grid-2">

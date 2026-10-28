@@ -617,7 +617,73 @@ export default function CustomerDashboard() {
         );
       })()}
 
-      <div style={{ marginTop: '-16px', marginBottom: '24px' }}>
+      {/* Monthly Target Schedule Card — Dynamic Recalculation across Remaining Months */}
+      {(() => {
+        const schedule = data?.monthlySchedule;
+        if (!schedule) return null;
+
+        const currentTarget = schedule.currentMonthTargetKwh ?? 0;
+        const boughtThisMonth = schedule.currentMonthBoughtKwh ?? 0;
+        const remainingThisMonth = schedule.currentMonthRemainingKwh ?? 0;
+        const progressPct = schedule.currentMonthProgressPercent ?? 0;
+        const currentMonth = schedule.currentMonthNumber ?? 1;
+        const totalMonths = schedule.totalMonths ?? 12;
+        const remainingMonths = schedule.remainingMonths ?? 12;
+        const isTargetMet = remainingThisMonth <= 0 && currentTarget > 0;
+
+        return (
+          <div style={{ marginBottom: '24px', padding: '18px 20px', borderRadius: '12px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border-color)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '1.1rem' }}>📅</span>
+                <span style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-main)' }}>
+                  Monthly Target Schedule
+                </span>
+                <span style={{ fontSize: '0.78rem', color: 'var(--primary-accent)', background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '6px', padding: '2px 8px', fontWeight: 600 }}>
+                  Month {currentMonth} of {totalMonths} ({remainingMonths} remaining)
+                </span>
+              </div>
+
+              {isTargetMet ? (
+                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--success)', background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '6px', padding: '3px 10px' }}>
+                  ✅ Target Met This Month!
+                </span>
+              ) : (
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                  <strong style={{ color: '#38bdf8' }}>{remainingThisMonth.toFixed(2)} kWh</strong> needed this month
+                </span>
+              )}
+            </div>
+
+            {/* Monthly Target Progress Bar */}
+            <div style={{ background: 'rgba(255,255,255,0.07)', borderRadius: '99px', height: '10px', overflow: 'hidden', marginBottom: '8px' }}>
+              <div style={{
+                width: `${Math.min(100, Math.max(progressPct, progressPct > 0 ? 2 : 0))}%`,
+                height: '100%',
+                borderRadius: '99px',
+                background: isTargetMet ? 'linear-gradient(90deg, #10b981, #34d399)' : 'linear-gradient(90deg, #38bdf8, #818cf8)',
+                transition: 'width 0.6s ease'
+              }} />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '12px' }}>
+              <span>Bought this month: <strong style={{ color: 'white' }}>{boughtThisMonth.toFixed(2)} kWh</strong></span>
+              <span>This month's target: <strong style={{ color: 'white' }}>{currentTarget.toFixed(2)} kWh</strong></span>
+            </div>
+
+            {/* Dynamic Recalculation Note */}
+            <div style={{ padding: '10px 14px', borderRadius: '8px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.05)', fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: '1.45' }}>
+              {isTargetMet ? (
+                <span>🎉 Great job! You have reached your energy target for this month ({currentTarget.toFixed(2)} kWh). Any additional units purchased will reduce your required target over the remaining {remainingMonths} months.</span>
+              ) : (
+                <span>ℹ️ <strong>Monthly Target Division:</strong> Your target of {schedule.totalTargetKwh.toLocaleString()} kWh is divided across {totalMonths} months ({currentTarget.toFixed(2)} kWh/month). If you don't meet this month's target, the unmet deficit is automatically recalculated and distributed evenly into the remaining {remainingMonths} months.</span>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      <div style={{ marginTop: '-8px', marginBottom: '24px' }}>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginBottom: '10px' }}>
           <Coins size={12} style={{ verticalAlign: 'middle', marginRight: '4px' }} />
           Pending Wallet is money you've paid that hasn't converted into an energy token yet — it converts automatically once it reaches the minimum for your rate, or you can redeem it now below.
