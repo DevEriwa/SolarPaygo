@@ -620,6 +620,28 @@ namespace SolarPaygo.Api.Controllers
             public string? OwnerName { get; set; }
         }
 
+        [Authorize(Roles = "Admin,SuperAdmin")]
+        [HttpDelete("systems/{id}")]
+        public async Task<IActionResult> DeleteSystem(int id)
+        {
+            var system = await _context.SolarSystems.FindAsync(id);
+            if (system == null) return NotFound("Customer system not found.");
+
+            // Clean up related child records first to satisfy foreign key constraints
+            var logs = await _context.UsageLogs.Where(l => l.SolarSystemId == id).ToListAsync();
+            if (logs.Count > 0) _context.UsageLogs.RemoveRange(logs);
+
+            var transactions = await _context.Transactions.Where(t => t.SolarSystemId == id).ToListAsync();
+            if (transactions.Count > 0) _context.Transactions.RemoveRange(transactions);
+
+            _context.SolarSystems.Remove(system);
+            await _context.SaveChangesAsync();
+
+            _logger.LogInformation("[DeleteSystem] Admin deleted solar system {HardwareId} (ID: {Id}, Owner: {OwnerName})", system.HardwareId, system.Id, system.OwnerName);
+
+            return Ok(new { success = true, message = $"Customer {system.OwnerName} ({system.HardwareId}) was successfully deleted." });
+        }
+
         [Authorize(Roles = "Admin")]
         [HttpPost("systems/{id}/disable")]
         public async Task<IActionResult> DisableSystem(int id)

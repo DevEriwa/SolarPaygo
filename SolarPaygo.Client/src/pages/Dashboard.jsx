@@ -1,6 +1,6 @@
 ﻿import InvestorAdminSection from '../components/InvestorAdminSection';
 import React, { useState, useEffect } from 'react';
-import { Search, Lock, Unlock, MinusCircle, CreditCard, Plus, Activity, User, ShieldAlert, BadgeCheck, Phone, Mail, FileText, Coins, Power, Key } from 'lucide-react';
+import { Search, Lock, Unlock, MinusCircle, CreditCard, Plus, Activity, User, ShieldAlert, BadgeCheck, Phone, Mail, FileText, Coins, Power, Key, Trash2 } from 'lucide-react';
 import { BASE_URL } from '../config';
 
 export default function Dashboard({ dashboardData, loading, refreshData, pricePlans = [] }) {
@@ -13,6 +13,35 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
   const [loadingTransactions, setLoadingTransactions] = useState({});
 
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
+  const [systemToDelete, setSystemToDelete] = useState(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
+
+  const handleDeleteConfirm = async () => {
+    if (!systemToDelete) return;
+    setDeleteLoading(true);
+    setDeleteError(null);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${BASE_URL}/dashboard/systems/${systemToDelete.id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      if (response.ok) {
+        setSystemToDelete(null);
+        refreshData();
+      } else {
+        const errText = await response.text();
+        setDeleteError(errText || 'Failed to delete customer.');
+      }
+    } catch (err) {
+      setDeleteError('Network error while deleting system.');
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
   const [regHardwareId, setRegHardwareId] = useState('');
   const [regOwnerName, setRegOwnerName] = useState('');
   const [regFirstName, setRegFirstName] = useState('');
@@ -782,6 +811,19 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
                         >
                           ⚙️ Manage Stron
                         </button>
+
+                        <button 
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            setSystemToDelete(sys);
+                            setDeleteError(null);
+                          }} 
+                          className="action-btn" 
+                          style={{ padding: '6px 12px', background: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.35)', color: '#ef4444' }}
+                          title="Delete Generator / Customer"
+                        >
+                          <Trash2 size={13} style={{ marginRight: '4px' }} /> Delete
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -1431,6 +1473,47 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
 
       {activeView === 'investors' && (
         <InvestorAdminSection formatNaira={formatNaira} />
+      )}
+
+      {/* DELETE CONFIRMATION MODAL */}
+      {systemToDelete && (
+        <div className="app-modal-backdrop" style={{ zIndex: 1100 }}>
+          <div className="app-modal-dialog" style={{ maxWidth: '440px', padding: '24px', textAlign: 'center' }}>
+            <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(239,68,68,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px auto', color: '#ef4444' }}>
+              <Trash2 size={24} />
+            </div>
+            <h3 style={{ color: 'white', marginBottom: '8px', fontSize: '1.2rem', fontWeight: 700 }}>Delete Customer Generator</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', lineHeight: '1.5', marginBottom: '20px' }}>
+              Are you sure you want to delete <strong style={{ color: 'white' }}>{systemToDelete.ownerName || systemToDelete.OwnerName}</strong> ({systemToDelete.hardwareId || systemToDelete.HardwareId})? 
+              <br /><span style={{ color: '#ef4444', fontSize: '0.8rem', display: 'block', marginTop: '6px' }}>⚠️ This action will permanently remove the generator and its records from the system.</span>
+            </p>
+            {deleteError && (
+              <div style={{ background: 'var(--danger-bg)', color: 'var(--danger)', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '10px', borderRadius: '8px', marginBottom: '16px', fontSize: '0.85rem' }}>
+                {deleteError}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button 
+                type="button" 
+                onClick={() => setSystemToDelete(null)} 
+                className="action-btn" 
+                style={{ flex: 1, padding: '10px' }} 
+                disabled={deleteLoading}
+              >
+                Cancel
+              </button>
+              <button 
+                type="button" 
+                onClick={handleDeleteConfirm} 
+                className="action-btn" 
+                style={{ flex: 1, padding: '10px', background: '#ef4444', borderColor: '#ef4444', color: 'white', fontWeight: 600 }} 
+                disabled={deleteLoading}
+              >
+                {deleteLoading ? 'Deleting...' : 'Yes, Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* REGISTRATION MODAL */}
