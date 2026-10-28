@@ -80,7 +80,7 @@ namespace SolarPaygo.Api.Controllers
                 s.DailyKwhConsumed, s.DailyTimeActiveHours, s.DailyAmountCharged,
                 s.Voltage, s.Current, s.Power, s.RelayState, s.CoverState, s.IsOverloaded,
                 s.GeneratorCapacity,
-                s.PricePlanId,
+                s.AgreementMonths, s.AgreementStartDate, s.PricePlanId,
                 PricePlan = s.PricePlan == null ? null : new {
                     s.PricePlan.Id, s.PricePlan.Band, s.PricePlan.Name, s.PricePlan.PricePerKwh,
                     s.PricePlan.LoyaltyDiscountEnabled, s.PricePlan.LoyaltyThresholdKwh, s.PricePlan.LoyaltyDiscountPercent,
@@ -380,6 +380,41 @@ namespace SolarPaygo.Api.Controllers
                 .Take(10)
                 .ToListAsync();
 
+            // Compute Monthly Agreement Target & Dynamic Deficit Recalculation
+            decimal targetKwh = system.PricePlan?.LoyaltyThresholdKwh > 0 ? system.PricePlan.LoyaltyThresholdKwh : 1000m;
+            int totalMonths = system.AgreementMonths > 0 ? system.AgreementMonths : 12;
+            DateTime startDate = system.AgreementStartDate ?? system.LastBillingDate ?? DateTime.UtcNow;
+
+            int monthsElapsed = Math.Max(0, ((DateTime.UtcNow.Year - startDate.Year) * 12) + DateTime.UtcNow.Month - startDate.Month);
+            int currentMonthNum = Math.Min(totalMonths, monthsElapsed + 1);
+            int remainingMonths = Math.Max(1, totalMonths - monthsElapsed);
+
+            var monthStart = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+            decimal boughtThisMonth = await _context.Transactions
+                .Where(t => t.SolarSystemId == system.Id && t.Status == "Completed" && t.TransactionDate >= monthStart)
+                .SumAsync(t => (decimal?)t.UnitsAdded) ?? 0m;
+
+            decimal totalBought = system.CumulativeKwhBought;
+            decimal boughtPriorToThisMonth = Math.Max(0m, totalBought - boughtThisMonth);
+            decimal remainingTargetForAgreement = Math.Max(0m, targetKwh - boughtPriorToThisMonth);
+
+            // Dynamically distribute remaining deficit/surplus across remaining months
+            decimal currentMonthTarget = Math.Round(remainingTargetForAgreement / remainingMonths, 2);
+            decimal currentMonthRemaining = Math.Max(0m, currentMonthTarget - boughtThisMonth);
+            decimal currentMonthProgress = currentMonthTarget > 0 ? Math.Min(100m, Math.Round((boughtThisMonth / currentMonthTarget) * 100m, 1)) : 100m;
+
+            var monthlySchedule = new {
+                TotalTargetKwh = targetKwh,
+                TotalMonths = totalMonths,
+                CurrentMonthNumber = currentMonthNum,
+                RemainingMonths = remainingMonths,
+                CurrentMonthTargetKwh = currentMonthTarget,
+                CurrentMonthBoughtKwh = boughtThisMonth,
+                CurrentMonthRemainingKwh = currentMonthRemaining,
+                CurrentMonthProgressPercent = currentMonthProgress,
+                OverallProgressPercent = targetKwh > 0 ? Math.Min(100m, Math.Round((totalBought / targetKwh) * 100m, 1)) : 100m
+            };
+
             // Include computed MeterOnline flag (true if last sync within 15 minutes)
             bool meterOnline = system.LastSyncTime.HasValue && (DateTime.UtcNow - system.LastSyncTime.Value).TotalMinutes < 15;
 
@@ -393,12 +428,20 @@ namespace SolarPaygo.Api.Controllers
                     system.DailyKwhConsumed, system.DailyTimeActiveHours, system.DailyAmountCharged,
                     system.Voltage, system.Current, system.Power, system.RelayState, system.CoverState, system.IsOverloaded,
                     system.GeneratorCapacity, system.PricePlanId, system.DeviceGroupId,
+                    system.AgreementMonths, system.AgreementStartDate,
                     PricePlan = system.PricePlan == null ? null : new {
                         system.PricePlan.Id, system.PricePlan.Band, system.PricePlan.Name,
-                        system.PricePlan.PricePerKwh
+                        system.PricePlan.PricePerKwh,
+                        system.PricePlan.LoyaltyDiscountEnabled,
+                        system.PricePlan.LoyaltyThresholdKwh,
+                        system.PricePlan.LoyaltyDiscountPercent,
+                        system.PricePlan.TimeFloorProtectionEnabled,
+                        system.PricePlan.TimeFloorRatePerHour,
+                        system.PricePlan.TimeFloorMinimumKwh
                     },
                     MeterOnline = meterOnline
                 },
+                MonthlySchedule = monthlySchedule,
                 RecentUsage = logs,
                 RecentTransactions = transactions
             });
@@ -418,6 +461,7 @@ namespace SolarPaygo.Api.Controllers
             public string GeneratorCapacity { get; set; } = "2KV"; // e.g. 1KV, 2KV, 3KV, 5KV, 10KV
             public int? PricePlanId { get; set; } // optional — null means legacy/standard pricing
             public int? DeviceGroupId { get; set; } // optional — null means Ungrouped
+            public int? AgreementMonths { get; set; } = 12; // Agreement duration in months (default 12)
 
             // Support snake_case/Squad-style names if sent directly
             public string? customer_identifier { get; set; }
@@ -552,7 +596,9 @@ namespace SolarPaygo.Api.Controllers
                 LastSyncTime = DateTime.UtcNow,
                 LastSyncKwh = 0m,
                 PricePlanId = request.PricePlanId,
-                DeviceGroupId = request.DeviceGroupId
+                DeviceGroupId = request.DeviceGroupId,
+                AgreementMonths = request.AgreementMonths.HasValue && request.AgreementMonths.Value > 0 ? request.AgreementMonths.Value : 12,
+                AgreementStartDate = DateTime.UtcNow
             };
 
             _context.SolarSystems.Add(newSystem);
@@ -612,6 +658,50 @@ namespace SolarPaygo.Api.Controllers
             public string? CustomerDob { get; set; }
             public string? CustomerPhone { get; set; }
             public string? OwnerName { get; set; }
+        }
+
+        public class UpdateAgreementMonthsRequest
+        {
+            public int AgreementMonths { get; set; } = 12;
+        }
+
+        [Authorize(Roles = "Admin,SuperAdmin")]
+        [HttpPost("systems/{id}/agreement-months")]
+        public async Task<IActionResult> UpdateAgreementMonths(int id, [FromBody] UpdateAgreementMonthsRequest req)
+        {
+            var system = await _context.SolarSystems.FindAsync(id);
+            if (system == null) return NotFound("System not found.");
+
+            if (req.AgreementMonths > 0)
+            {
+                system.AgreementMonths = req.AgreementMonths;
+                if (!system.AgreementStartDate.HasValue) system.AgreementStartDate = DateTime.UtcNow;
+                await _context.SaveChangesAsync();
+            }
+
+            return Ok(new { success = true, agreementMonths = system.AgreementMonths, message = "Agreement duration updated successfully." });
+        }
+
+        [Authorize(Roles = "Admin,SuperAdmin")]
+        [HttpDelete("systems/{id}")]
+        public async Task<IActionResult> DeleteSystem(int id)
+        {
+            var system = await _context.SolarSystems.FindAsync(id);
+            if (system == null) return NotFound("Customer system not found.");
+
+            // Clean up related child records first to satisfy foreign key constraints
+            var logs = await _context.UsageLogs.Where(l => l.SolarSystemId == id).ToListAsync();
+            if (logs.Count > 0) _context.UsageLogs.RemoveRange(logs);
+
+            var transactions = await _context.Transactions.Where(t => t.SolarSystemId == id).ToListAsync();
+            if (transactions.Count > 0) _context.Transactions.RemoveRange(transactions);
+
+            _context.SolarSystems.Remove(system);
+            await _context.SaveChangesAsync();
+
+            _logger.LogInformation("[DeleteSystem] Admin deleted solar system {HardwareId} (ID: {Id}, Owner: {OwnerName})", system.HardwareId, system.Id, system.OwnerName);
+
+            return Ok(new { success = true, message = $"Customer {system.OwnerName} ({system.HardwareId}) was successfully deleted." });
         }
 
         [Authorize(Roles = "Admin")]

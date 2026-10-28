@@ -66,6 +66,10 @@ namespace SolarPaygo.Api.Models
 
         public bool LowBalanceNotified { get; set; } = false;
 
+        // Agreement Target Period (Months)
+        public int AgreementMonths { get; set; } = 12;
+        public DateTime? AgreementStartDate { get; set; }
+
         // Assigned Device Group/Tab. Null means Ungrouped / default view.
         public int? DeviceGroupId { get; set; }
         public DeviceGroup? DeviceGroup { get; set; }
