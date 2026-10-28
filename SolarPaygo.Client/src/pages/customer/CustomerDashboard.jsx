@@ -522,23 +522,22 @@ export default function CustomerDashboard() {
         const consumed = system.cumulativeKwhConsumed ?? 0; // billing metric
         const bought   = system.cumulativeKwhBought   ?? 0; // display metric
 
-        // Resolve real loyalty settings from the plan (fallback to safe defaults)
-        const loyaltyEnabled   = plan?.loyaltyDiscountEnabled ?? false;
-        const loyaltyThreshold = loyaltyEnabled
-          ? (plan?.loyaltyThresholdKwh ?? 500)
-          : 500; // always show progress toward 500 kWh even without plan
+        // Resolve real loyalty settings from the plan (defaults to 1000 kWh if not configured)
+        const loyaltyThreshold = plan?.loyaltyThresholdKwh && plan.loyaltyThresholdKwh > 0
+          ? plan.loyaltyThresholdKwh
+          : 1000;
+        const loyaltyEnabled   = plan?.loyaltyDiscountEnabled ?? true;
         const loyaltyDiscount  = plan?.loyaltyDiscountPercent ?? 50;
         const baseRate         = plan?.pricePerKwh ?? 2500;
         const discountedRate   = baseRate * (1 - loyaltyDiscount / 100);
 
-        // Loyalty state — only relevant when admin has enabled loyalty on the plan
-        const loyaltyUnlocked  = loyaltyEnabled && consumed >= loyaltyThreshold;
-        const kwhToDiscount    = Math.max(0, loyaltyThreshold - consumed);
+        // Loyalty state & progress based on Total Bought (as requested)
+        const loyaltyUnlocked  = loyaltyEnabled && bought >= loyaltyThreshold;
+        const kwhToDiscount    = Math.max(0, loyaltyThreshold - bought);
 
-        // Progress bar: always use consumed/threshold so bar is always visible
-        // Use a minimum visual width of 2% so bar is never invisible at zero
-        const rawProgress = Math.min(100, (consumed / loyaltyThreshold) * 100);
-        const progress    = rawProgress < 2 && consumed > 0 ? 2 : rawProgress;
+        // Progress bar: based on bought / threshold so it tracks energy bought
+        const rawProgress = Math.min(100, (bought / loyaltyThreshold) * 100);
+        const progress    = rawProgress < 2 && bought > 0 ? 2 : rawProgress;
         const barColor    = loyaltyUnlocked
           ? 'linear-gradient(90deg, #f59e0b, #facc15)'
           : 'linear-gradient(90deg, #38bdf8, #818cf8)';
@@ -583,7 +582,7 @@ export default function CustomerDashboard() {
               }} />
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '10px' }}>
-              <span>{consumed.toFixed(2)} kWh consumed</span>
+              <span>{bought.toFixed(2)} kWh bought</span>
               <span>Target: {loyaltyThreshold.toLocaleString()} kWh</span>
             </div>
 
