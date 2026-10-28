@@ -522,23 +522,22 @@ export default function CustomerDashboard() {
         const consumed = system.cumulativeKwhConsumed ?? 0; // billing metric
         const bought   = system.cumulativeKwhBought   ?? 0; // display metric
 
-        // Resolve real loyalty settings from the plan (fallback to safe defaults)
-        const loyaltyEnabled   = plan?.loyaltyDiscountEnabled ?? false;
-        const loyaltyThreshold = loyaltyEnabled
-          ? (plan?.loyaltyThresholdKwh ?? 500)
-          : 500; // always show progress toward 500 kWh even without plan
+        // Resolve real loyalty settings from the plan (defaults to 1000 kWh if not configured)
+        const loyaltyThreshold = plan?.loyaltyThresholdKwh && plan.loyaltyThresholdKwh > 0
+          ? plan.loyaltyThresholdKwh
+          : 1000;
+        const loyaltyEnabled   = plan?.loyaltyDiscountEnabled ?? true;
         const loyaltyDiscount  = plan?.loyaltyDiscountPercent ?? 50;
         const baseRate         = plan?.pricePerKwh ?? 2500;
         const discountedRate   = baseRate * (1 - loyaltyDiscount / 100);
 
-        // Loyalty state — only relevant when admin has enabled loyalty on the plan
-        const loyaltyUnlocked  = loyaltyEnabled && consumed >= loyaltyThreshold;
-        const kwhToDiscount    = Math.max(0, loyaltyThreshold - consumed);
+        // Loyalty state & progress based on Total Bought (as requested)
+        const loyaltyUnlocked  = loyaltyEnabled && bought >= loyaltyThreshold;
+        const kwhToDiscount    = Math.max(0, loyaltyThreshold - bought);
 
-        // Progress bar: always use consumed/threshold so bar is always visible
-        // Use a minimum visual width of 2% so bar is never invisible at zero
-        const rawProgress = Math.min(100, (consumed / loyaltyThreshold) * 100);
-        const progress    = rawProgress < 2 && consumed > 0 ? 2 : rawProgress;
+        // Progress bar: based on bought / threshold so it tracks energy bought
+        const rawProgress = Math.min(100, (bought / loyaltyThreshold) * 100);
+        const progress    = rawProgress < 2 && bought > 0 ? 2 : rawProgress;
         const barColor    = loyaltyUnlocked
           ? 'linear-gradient(90deg, #f59e0b, #facc15)'
           : 'linear-gradient(90deg, #38bdf8, #818cf8)';
@@ -583,7 +582,7 @@ export default function CustomerDashboard() {
               }} />
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '10px' }}>
-              <span>{consumed.toFixed(2)} kWh consumed</span>
+              <span>{bought.toFixed(2)} kWh bought</span>
               <span>Target: {loyaltyThreshold.toLocaleString()} kWh</span>
             </div>
 
@@ -618,7 +617,73 @@ export default function CustomerDashboard() {
         );
       })()}
 
-      <div style={{ marginTop: '-16px', marginBottom: '24px' }}>
+      {/* Monthly Target Schedule Card — Dynamic Recalculation across Remaining Months */}
+      {(() => {
+        const schedule = data?.monthlySchedule;
+        if (!schedule) return null;
+
+        const currentTarget = schedule.currentMonthTargetKwh ?? 0;
+        const boughtThisMonth = schedule.currentMonthBoughtKwh ?? 0;
+        const remainingThisMonth = schedule.currentMonthRemainingKwh ?? 0;
+        const progressPct = schedule.currentMonthProgressPercent ?? 0;
+        const currentMonth = schedule.currentMonthNumber ?? 1;
+        const totalMonths = schedule.totalMonths ?? 12;
+        const remainingMonths = schedule.remainingMonths ?? 12;
+        const isTargetMet = remainingThisMonth <= 0 && currentTarget > 0;
+
+        return (
+          <div style={{ marginBottom: '24px', padding: '18px 20px', borderRadius: '12px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border-color)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '1.1rem' }}>📅</span>
+                <span style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-main)' }}>
+                  Monthly Target Schedule
+                </span>
+                <span style={{ fontSize: '0.78rem', color: 'var(--primary-accent)', background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: '6px', padding: '2px 8px', fontWeight: 600 }}>
+                  Month {currentMonth} of {totalMonths} ({remainingMonths} remaining)
+                </span>
+              </div>
+
+              {isTargetMet ? (
+                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--success)', background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '6px', padding: '3px 10px' }}>
+                  ✅ Target Met This Month!
+                </span>
+              ) : (
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                  <strong style={{ color: '#38bdf8' }}>{remainingThisMonth.toFixed(2)} kWh</strong> needed this month
+                </span>
+              )}
+            </div>
+
+            {/* Monthly Target Progress Bar */}
+            <div style={{ background: 'rgba(255,255,255,0.07)', borderRadius: '99px', height: '10px', overflow: 'hidden', marginBottom: '8px' }}>
+              <div style={{
+                width: `${Math.min(100, Math.max(progressPct, progressPct > 0 ? 2 : 0))}%`,
+                height: '100%',
+                borderRadius: '99px',
+                background: isTargetMet ? 'linear-gradient(90deg, #10b981, #34d399)' : 'linear-gradient(90deg, #38bdf8, #818cf8)',
+                transition: 'width 0.6s ease'
+              }} />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '12px' }}>
+              <span>Bought this month: <strong style={{ color: 'white' }}>{boughtThisMonth.toFixed(2)} kWh</strong></span>
+              <span>This month's target: <strong style={{ color: 'white' }}>{currentTarget.toFixed(2)} kWh</strong></span>
+            </div>
+
+            {/* Dynamic Recalculation Note */}
+            <div style={{ padding: '10px 14px', borderRadius: '8px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.05)', fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: '1.45' }}>
+              {isTargetMet ? (
+                <span>🎉 Great job! You have reached your energy target for this month ({currentTarget.toFixed(2)} kWh). Any additional units purchased will reduce your required target over the remaining {remainingMonths} months.</span>
+              ) : (
+                <span>ℹ️ <strong>Monthly Target Division:</strong> Your target of {schedule.totalTargetKwh.toLocaleString()} kWh is divided across {totalMonths} months ({currentTarget.toFixed(2)} kWh/month). If you don't meet this month's target, the unmet deficit is automatically recalculated and distributed evenly into the remaining {remainingMonths} months.</span>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      <div style={{ marginTop: '-8px', marginBottom: '24px' }}>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginBottom: '10px' }}>
           <Coins size={12} style={{ verticalAlign: 'middle', marginRight: '4px' }} />
           Pending Wallet is money you've paid that hasn't converted into an energy token yet — it converts automatically once it reaches the minimum for your rate, or you can redeem it now below.

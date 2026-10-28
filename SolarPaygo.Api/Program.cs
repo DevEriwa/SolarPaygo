@@ -283,6 +283,16 @@ using (var scope = app.Services.CreateScope())
                 ALTER TABLE SolarSystems ADD DeviceGroupId INT NULL;
             END
 
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('SolarSystems') AND name = 'AgreementMonths')
+            BEGIN
+                ALTER TABLE SolarSystems ADD AgreementMonths INT NOT NULL DEFAULT 12;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('SolarSystems') AND name = 'AgreementStartDate')
+            BEGIN
+                ALTER TABLE SolarSystems ADD AgreementStartDate DATETIME2 NULL;
+            END
+
             IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('GeneratorCapacities') AND name = 'OverloadThresholdPercent')
             BEGIN
                 ALTER TABLE GeneratorCapacities ADD OverloadThresholdPercent INT NOT NULL DEFAULT 90;
