@@ -293,6 +293,11 @@ using (var scope = app.Services.CreateScope())
                 ALTER TABLE SolarSystems ADD AgreementStartDate DATETIME2 NULL;
             END
 
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('SolarSystems') AND name = 'DeletedAt')
+            BEGIN
+                ALTER TABLE SolarSystems ADD DeletedAt DATETIME2 NULL;
+            END
+
             IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('GeneratorCapacities') AND name = 'OverloadThresholdPercent')
             BEGIN
                 ALTER TABLE GeneratorCapacities ADD OverloadThresholdPercent INT NOT NULL DEFAULT 90;

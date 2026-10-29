@@ -114,6 +114,79 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
   const [regAgreementMonths, setRegAgreementMonths] = useState(12);
   const [updatingMonths, setUpdatingMonths] = useState({});
   const [monthSuccess, setMonthSuccess] = useState({});
+  const [recycleBin, setRecycleBin] = useState([]);
+  const [recycleBinLoading, setRecycleBinLoading] = useState(false);
+  const [restoreLoading, setRestoreLoading] = useState({});
+  const [permDeleteLoading, setPermDeleteLoading] = useState({});
+  const [recycleBinOpen, setRecycleBinOpen] = useState(false);
+  const [recycleBinNotice, setRecycleBinNotice] = useState(null);
+
+  const fetchRecycleBin = async () => {
+    setRecycleBinLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${BASE_URL}/dashboard/systems/recycle-bin`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setRecycleBin(data);
+      }
+    } catch {
+      // silently handle
+    } finally {
+      setRecycleBinLoading(false);
+    }
+  };
+
+  const handleRestore = async (id, name) => {
+    setRestoreLoading(prev => ({ ...prev, [id]: true }));
+    setRecycleBinNotice(null);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${BASE_URL}/dashboard/systems/${id}/restore`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setRecycleBinNotice({ type: 'success', text: `✅ ${name} has been restored successfully.` });
+        fetchRecycleBin();
+        if (typeof refreshData === 'function') refreshData();
+      } else {
+        setRecycleBinNotice({ type: 'error', text: data.message || 'Restore failed.' });
+      }
+    } catch {
+      setRecycleBinNotice({ type: 'error', text: 'Network error during restore.' });
+    } finally {
+      setRestoreLoading(prev => ({ ...prev, [id]: false }));
+    }
+  };
+
+  const handlePermanentDelete = async (id, name) => {
+    if (!window.confirm(`⚠️ PERMANENT DELETE\n\nAre you absolutely sure you want to permanently delete ${name}?\n\nThis CANNOT be undone. All transaction history and usage logs will be erased.`)) return;
+    setPermDeleteLoading(prev => ({ ...prev, [id]: true }));
+    setRecycleBinNotice(null);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${BASE_URL}/dashboard/systems/${id}/permanent`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setRecycleBinNotice({ type: 'success', text: `🗑️ ${name} permanently deleted.` });
+        fetchRecycleBin();
+        if (typeof refreshData === 'function') refreshData();
+      } else {
+        setRecycleBinNotice({ type: 'error', text: data.message || 'Permanent delete failed.' });
+      }
+    } catch {
+      setRecycleBinNotice({ type: 'error', text: 'Network error during permanent delete.' });
+    } finally {
+      setPermDeleteLoading(prev => ({ ...prev, [id]: false }));
+    }
+  };
 
   const handleUpdateAgreementMonths = async (sysId, months) => {
     setUpdatingMonths(prev => ({ ...prev, [sysId]: true }));
@@ -474,7 +547,15 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
           <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginTop: '4px' }}>STE18-G Smart Meter Vending & Squad Virtual Accounts Dashboard</p>
         </div>
         <div style={{ display: 'flex', gap: '12px' }}>
-          <button onClick={() => { setRegSuccess(false); setRegError(null); setIsRegisterOpen(true); }} className="action-btn" style={{ background: 'var(--primary-accent)', color: 'var(--bg-dark)', borderColor: 'var(--primary-accent)', flexDirection: 'row', gap: '8px', padding: '8px 16px' }}>
+          <button
+          onClick={() => { fetchRecycleBin(); setRecycleBinOpen(true); }}
+          className="action-btn"
+          style={{ flexDirection: 'row', gap: '8px', padding: '8px 16px', background: 'rgba(239,68,68,0.08)', borderColor: 'rgba(239,68,68,0.3)', color: '#ef4444' }}
+        >
+          🗑️ Recycle Bin
+        </button>
+
+        <button onClick={() => { setRegSuccess(false); setRegError(null); setIsRegisterOpen(true); }} className="action-btn" style={{ background: 'var(--primary-accent)', color: 'var(--bg-dark)', borderColor: 'var(--primary-accent)', flexDirection: 'row', gap: '8px', padding: '8px 16px' }}>
             <Plus size={18} /> Register Generator
           </button>
           <div className="live-badge" style={{
@@ -838,18 +919,6 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
                           ⚙️ Manage Stron
                         </button>
 
-                        <button 
-                          onClick={(e) => { 
-                            e.stopPropagation(); 
-                            setSystemToDelete(sys);
-                            setDeleteError(null);
-                          }} 
-                          className="action-btn" 
-                          style={{ padding: '6px 12px', background: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.35)', color: '#ef4444' }}
-                          title="Delete Generator / Customer"
-                        >
-                          <Trash2 size={13} style={{ marginRight: '4px' }} /> Delete
-                        </button>
                       </div>
                     </td>
                   </tr>
@@ -948,35 +1017,66 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
                             </div>
 
                             <div style={{ marginTop: '12px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '10px 12px' }}>
-                              <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '6px' }}>📅 Edit Agreement Duration (Months)</label>
-                              <div style={{ display: 'flex', gap: '8px' }}>
-                                <select 
-                                  defaultValue={sys.agreementMonths || 12}
+                              <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '6px' }}>📅 Agreement Duration (Months) — enter any number</label>
+                              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max="120"
                                   id={`agreement-months-${sys.id}`}
-                                  style={{ flex: 1, padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.85rem' }}
-                                >
-                                  <option value={6}>6 Months</option>
-                                  <option value={12}>12 Months (1 Year)</option>
-                                  <option value={18}>18 Months (1.5 Years)</option>
-                                  <option value={24}>24 Months (2 Years)</option>
-                                  <option value={36}>36 Months (3 Years)</option>
-                                  <option value={48}>48 Months (4 Years)</option>
-                                </select>
+                                  defaultValue={sys.agreementMonths || 12}
+                                  style={{ flex: 1, padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.9rem', textAlign: 'center' }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      handleUpdateAgreementMonths(sys.id, e.target.value);
+                                    }
+                                  }}
+                                />
+                                <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>months</span>
                                 <button
                                   onClick={() => {
-                                    const sel = document.getElementById(`agreement-months-${sys.id}`);
-                                    if (sel) handleUpdateAgreementMonths(sys.id, sel.value);
+                                    const inp = document.getElementById(`agreement-months-${sys.id}`);
+                                    if (inp && inp.value > 0) handleUpdateAgreementMonths(sys.id, inp.value);
                                   }}
                                   disabled={updatingMonths[sys.id]}
                                   className="action-btn"
-                                  style={{ padding: '7px 12px', background: 'var(--primary-accent)', color: 'var(--bg-dark)', borderColor: 'var(--primary-accent)', fontSize: '0.8rem', fontWeight: 600 }}
+                                  style={{ padding: '7px 14px', background: 'var(--primary-accent)', color: 'var(--bg-dark)', borderColor: 'var(--primary-accent)', fontSize: '0.8rem', fontWeight: 600, whiteSpace: 'nowrap' }}
                                 >
                                   {updatingMonths[sys.id] ? 'Saving...' : 'Save'}
                                 </button>
                               </div>
+                              {(() => {
+                                const threshold = sys.pricePlan?.loyaltyThresholdKwh || 1000;
+                                const months = sys.agreementMonths || 12;
+                                const monthlyTarget = (threshold / months).toFixed(2);
+                                return (
+                                  <div style={{ fontSize: '0.72rem', color: 'var(--primary-accent)', marginTop: '6px' }}>
+                                    🎯 {threshold.toLocaleString()} kWh ÷ {months} months = <strong>{monthlyTarget} kWh/month</strong>
+                                  </div>
+                                );
+                              })()}
                               {monthSuccess[sys.id] && (
                                 <div style={{ fontSize: '0.75rem', color: 'var(--success)', marginTop: '4px' }}>{monthSuccess[sys.id]}</div>
                               )}
+                            </div>
+
+                            {/* ── DANGER ZONE: Delete (inside panel, not exposed on table row) ── */}
+                            <div style={{ marginTop: '12px', background: 'rgba(239,68,68,0.04)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '6px', padding: '10px 12px' }}>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '8px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>⚠️ Danger Zone</div>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSystemToDelete(sys);
+                                  setDeleteError(null);
+                                }}
+                                className="action-btn"
+                                style={{ padding: '7px 14px', background: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.35)', color: '#ef4444', fontSize: '0.8rem', width: '100%' }}
+                              >
+                                🗑️ Move to Recycle Bin
+                              </button>
+                              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '5px' }}>
+                                The customer will be held in Recycle Bin for 30 days before permanent deletion. You can restore them any time.
+                              </div>
                             </div>
                           </div>
 
@@ -1534,6 +1634,81 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
         <InvestorAdminSection formatNaira={formatNaira} />
       )}
 
+      {/* RECYCLE BIN MODAL */}
+      {recycleBinOpen && (
+        <div className="app-modal-backdrop" style={{ zIndex: 1200 }}>
+          <div className="app-modal-dialog" style={{ maxWidth: '720px' }}>
+            <div className="app-modal-header">
+              <h2 style={{ fontSize: '1.2rem', color: 'white', margin: 0, fontWeight: 700 }}>🗑️ Recycle Bin</h2>
+              <button type="button" onClick={() => { setRecycleBinOpen(false); setRecycleBinNotice(null); }} className="app-modal-close-btn" aria-label="Close">&times;</button>
+            </div>
+
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '16px' }}>
+              Customers moved to the Recycle Bin are held here for <strong style={{ color: 'white' }}>30 days</strong> before permanent deletion. You can restore any customer within this period.
+            </p>
+
+            {recycleBinNotice && (
+              <div style={{
+                background: recycleBinNotice.type === 'success' ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)',
+                border: `1px solid ${recycleBinNotice.type === 'success' ? 'rgba(16,185,129,0.4)' : 'rgba(239,68,68,0.4)'}`,
+                color: recycleBinNotice.type === 'success' ? 'var(--success)' : 'var(--danger)',
+                borderRadius: '8px', padding: '10px 14px', marginBottom: '14px', fontSize: '0.86rem'
+              }}>
+                {recycleBinNotice.text}
+              </div>
+            )}
+
+            {recycleBinLoading ? (
+              <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px' }}>Loading Recycle Bin...</div>
+            ) : recycleBin.length === 0 ? (
+              <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px' }}>
+                <div style={{ fontSize: '2rem', marginBottom: '8px' }}>✅</div>
+                Recycle Bin is empty. No deleted customers at this time.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '420px', overflowY: 'auto' }}>
+                {recycleBin.map(item => (
+                  <div key={item.id} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '14px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                    <div style={{ flex: 1, minWidth: '200px' }}>
+                      <div style={{ fontWeight: 700, color: 'white', fontSize: '0.95rem' }}>{item.ownerName || 'Unknown'}</div>
+                      <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                        HW: <strong style={{ color: '#94a3b8' }}>{item.hardwareId}</strong> &nbsp;·&nbsp;
+                        Meter: {item.stronMeterId || 'N/A'} &nbsp;·&nbsp;
+                        VA: {item.virtualAccountNumber || 'None'}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                        📅 Deleted: {new Date(item.deletedAt).toLocaleString()} &nbsp;·&nbsp;
+                        <span style={{ color: item.daysUntilPermanentDelete <= 5 ? '#ef4444' : '#f59e0b', fontWeight: 600 }}>
+                          ⏳ {item.daysUntilPermanentDelete} day{item.daysUntilPermanentDelete !== 1 ? 's' : ''} until permanent delete
+                        </span>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+                      <button
+                        onClick={() => handleRestore(item.id, item.ownerName)}
+                        disabled={restoreLoading[item.id]}
+                        className="action-btn"
+                        style={{ padding: '7px 14px', background: 'rgba(16,185,129,0.12)', borderColor: 'rgba(16,185,129,0.4)', color: 'var(--success)', fontSize: '0.82rem', fontWeight: 600 }}
+                      >
+                        {restoreLoading[item.id] ? 'Restoring...' : '↩️ Restore'}
+                      </button>
+                      <button
+                        onClick={() => handlePermanentDelete(item.id, item.ownerName)}
+                        disabled={permDeleteLoading[item.id]}
+                        className="action-btn"
+                        style={{ padding: '7px 14px', background: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.35)', color: '#ef4444', fontSize: '0.82rem', fontWeight: 600 }}
+                      >
+                        {permDeleteLoading[item.id] ? 'Deleting...' : '💀 Permanently Delete'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* DELETE CONFIRMATION MODAL */}
       {systemToDelete && (
         <div className="app-modal-backdrop" style={{ zIndex: 1100 }}>
@@ -1541,10 +1716,10 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
             <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(239,68,68,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px auto', color: '#ef4444' }}>
               <Trash2 size={24} />
             </div>
-            <h3 style={{ color: 'white', marginBottom: '8px', fontSize: '1.2rem', fontWeight: 700 }}>Delete Customer Generator</h3>
+            <h3 style={{ color: 'white', marginBottom: '8px', fontSize: '1.2rem', fontWeight: 700 }}>Move to Recycle Bin</h3>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', lineHeight: '1.5', marginBottom: '20px' }}>
-              Are you sure you want to delete <strong style={{ color: 'white' }}>{systemToDelete.ownerName || systemToDelete.OwnerName}</strong> ({systemToDelete.hardwareId || systemToDelete.HardwareId})? 
-              <br /><span style={{ color: '#ef4444', fontSize: '0.8rem', display: 'block', marginTop: '6px' }}>⚠️ This action will permanently remove the generator and its records from the system.</span>
+              Move <strong style={{ color: 'white' }}>{systemToDelete.ownerName || systemToDelete.OwnerName}</strong> ({systemToDelete.hardwareId || systemToDelete.HardwareId}) to the Recycle Bin?
+              <br /><span style={{ color: '#f59e0b', fontSize: '0.8rem', display: 'block', marginTop: '6px' }}>🗑️ They will be held for 30 days. You can restore them any time from the Recycle Bin before permanent deletion.</span>
             </p>
             {deleteError && (
               <div style={{ background: 'var(--danger-bg)', color: 'var(--danger)', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '10px', borderRadius: '8px', marginBottom: '16px', fontSize: '0.85rem' }}>
@@ -1568,7 +1743,7 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
                 style={{ flex: 1, padding: '10px', background: '#ef4444', borderColor: '#ef4444', color: 'white', fontWeight: 600 }} 
                 disabled={deleteLoading}
               >
-                {deleteLoading ? 'Deleting...' : 'Yes, Delete'}
+                {deleteLoading ? 'Moving...' : '🗑️ Move to Recycle Bin'}
               </button>
             </div>
           </div>
