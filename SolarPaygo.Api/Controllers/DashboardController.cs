@@ -44,7 +44,7 @@ namespace SolarPaygo.Api.Controllers
         [HttpGet("systems")]
         public async Task<IActionResult> GetDashboardSummary()
         {
-            var systems = await _context.SolarSystems.Include(s => s.PricePlan).Include(s => s.DeviceGroup).ToListAsync();
+            var systems = await _context.SolarSystems.Where(s => s.DeletedAt == null).Include(s => s.PricePlan).Include(s => s.DeviceGroup).ToListAsync();
 
             // Calculate today's revenue
             var today = DateTime.UtcNow.Date;
@@ -257,7 +257,7 @@ namespace SolarPaygo.Api.Controllers
         [HttpGet("systems/{id}")]
         public async Task<IActionResult> GetSystemDetails(int id, [FromQuery] bool sync = false)
         {
-            var system = await _context.SolarSystems.Include(s => s.PricePlan).FirstOrDefaultAsync(s => s.Id == id);
+            var system = await _context.SolarSystems.Where(s => s.DeletedAt == null).Include(s => s.PricePlan).FirstOrDefaultAsync(s => s.Id == id);
             if (system == null) return NotFound();
 
             // Synchronous hardware IoT sync only if explicitly requested (e.g. ?sync=true)
@@ -337,7 +337,7 @@ namespace SolarPaygo.Api.Controllers
 
             if (!string.IsNullOrEmpty(systemIdClaim) && int.TryParse(systemIdClaim, out int systemId))
             {
-                system = await _context.SolarSystems.Include(s => s.PricePlan).FirstOrDefaultAsync(s => s.Id == systemId);
+                system = await _context.SolarSystems.Where(s => s.DeletedAt == null).Include(s => s.PricePlan).FirstOrDefaultAsync(s => s.Id == systemId);
             }
             else
             {
@@ -346,7 +346,7 @@ namespace SolarPaygo.Api.Controllers
                           ?? User.FindFirst("sub")?.Value;
                 if (!string.IsNullOrEmpty(sub))
                 {
-                    system = await _context.SolarSystems.Include(s => s.PricePlan)
+                    system = await _context.SolarSystems.Where(s => s.DeletedAt == null).Include(s => s.PricePlan)
                         .FirstOrDefaultAsync(s => (s.CustomerEmail != null && s.CustomerEmail.ToLower() == sub.ToLower()) || s.HardwareId.ToLower() == sub.ToLower());
                 }
             }
@@ -686,10 +686,71 @@ namespace SolarPaygo.Api.Controllers
         [HttpDelete("systems/{id}")]
         public async Task<IActionResult> DeleteSystem(int id)
         {
+            // Soft-delete: set DeletedAt timestamp. The record moves to the Recycle Bin.
+            // A background process or admin action permanently deletes after 30 days.
             var system = await _context.SolarSystems.FindAsync(id);
             if (system == null) return NotFound("Customer system not found.");
 
-            // Clean up related child records first to satisfy foreign key constraints
+            system.DeletedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+
+            _logger.LogInformation("[SoftDelete] Admin soft-deleted solar system {HardwareId} (ID: {Id}, Owner: {OwnerName}) at {DeletedAt}", system.HardwareId, system.Id, system.OwnerName, system.DeletedAt);
+
+            return Ok(new { success = true, message = $"Customer {system.OwnerName} ({system.HardwareId}) was moved to Recycle Bin. It will be permanently deleted in 30 days." });
+        }
+
+        /// <summary>
+        /// List soft-deleted systems (Recycle Bin). Returns systems deleted within the last 30 days.
+        /// </summary>
+        [Authorize(Roles = "Admin,SuperAdmin")]
+        [HttpGet("systems/recycle-bin")]
+        public async Task<IActionResult> GetRecycleBin()
+        {
+            var cutoff = DateTime.UtcNow.AddDays(-30);
+            var deleted = await _context.SolarSystems
+                .Where(s => s.DeletedAt != null && s.DeletedAt >= cutoff)
+                .OrderByDescending(s => s.DeletedAt)
+                .Select(s => new {
+                    s.Id, s.HardwareId, s.OwnerName, s.StronMeterId,
+                    s.VirtualAccountNumber, s.VirtualBankName,
+                    s.CustomerEmail, s.CustomerPhone,
+                    s.PrepaidNairaBalance, s.CumulativeKwhBought, s.CumulativeKwhConsumed,
+                    s.AgreementMonths, s.DeletedAt,
+                    DaysUntilPermanentDelete = 30 - (int)(DateTime.UtcNow - s.DeletedAt!.Value).TotalDays
+                })
+                .ToListAsync();
+            return Ok(deleted);
+        }
+
+        /// <summary>
+        /// Restore a soft-deleted system from the Recycle Bin.
+        /// </summary>
+        [Authorize(Roles = "Admin,SuperAdmin")]
+        [HttpPost("systems/{id}/restore")]
+        public async Task<IActionResult> RestoreSystem(int id)
+        {
+            var system = await _context.SolarSystems.FindAsync(id);
+            if (system == null) return NotFound("System not found.");
+            if (system.DeletedAt == null) return BadRequest("System is not in the Recycle Bin.");
+
+            system.DeletedAt = null;
+            await _context.SaveChangesAsync();
+
+            _logger.LogInformation("[RestoreSystem] Admin restored solar system {HardwareId} (ID: {Id}, Owner: {OwnerName})", system.HardwareId, system.Id, system.OwnerName);
+            return Ok(new { success = true, message = $"Customer {system.OwnerName} ({system.HardwareId}) has been restored successfully." });
+        }
+
+        /// <summary>
+        /// Permanently delete a system from the Recycle Bin (irreversible).
+        /// </summary>
+        [Authorize(Roles = "Admin,SuperAdmin")]
+        [HttpDelete("systems/{id}/permanent")]
+        public async Task<IActionResult> PermanentlyDeleteSystem(int id)
+        {
+            var system = await _context.SolarSystems.FindAsync(id);
+            if (system == null) return NotFound("System not found.");
+            if (system.DeletedAt == null) return BadRequest("System must be in the Recycle Bin before permanent deletion.");
+
             var logs = await _context.UsageLogs.Where(l => l.SolarSystemId == id).ToListAsync();
             if (logs.Count > 0) _context.UsageLogs.RemoveRange(logs);
 
@@ -699,9 +760,8 @@ namespace SolarPaygo.Api.Controllers
             _context.SolarSystems.Remove(system);
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation("[DeleteSystem] Admin deleted solar system {HardwareId} (ID: {Id}, Owner: {OwnerName})", system.HardwareId, system.Id, system.OwnerName);
-
-            return Ok(new { success = true, message = $"Customer {system.OwnerName} ({system.HardwareId}) was successfully deleted." });
+            _logger.LogInformation("[PermanentDelete] Admin permanently deleted solar system {HardwareId} (ID: {Id}, Owner: {OwnerName})", system.HardwareId, system.Id, system.OwnerName);
+            return Ok(new { success = true, message = $"Customer {system.OwnerName} ({system.HardwareId}) was permanently deleted." });
         }
 
         [Authorize(Roles = "Admin")]
@@ -861,7 +921,7 @@ namespace SolarPaygo.Api.Controllers
         [HttpPost("systems/{id}/redeem-wallet")]
         public async Task<IActionResult> AdminRedeemWallet(int id)
         {
-            var system = await _context.SolarSystems.Include(s => s.PricePlan).FirstOrDefaultAsync(s => s.Id == id);
+            var system = await _context.SolarSystems.Where(s => s.DeletedAt == null).Include(s => s.PricePlan).FirstOrDefaultAsync(s => s.Id == id);
             if (system == null) return NotFound("Solar system not found.");
 
             if (string.IsNullOrWhiteSpace(system.StronMeterId))

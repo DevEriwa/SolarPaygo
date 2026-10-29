@@ -70,6 +70,10 @@ namespace SolarPaygo.Api.Models
         public int AgreementMonths { get; set; } = 12;
         public DateTime? AgreementStartDate { get; set; }
 
+        // Soft-Delete (Recycle Bin): set to DateTime when admin soft-deletes.
+        // Null means the record is live. Background job permanently deletes after 30 days.
+        public DateTime? DeletedAt { get; set; }
+
         // Assigned Device Group/Tab. Null means Ungrouped / default view.
         public int? DeviceGroupId { get; set; }
         public DeviceGroup? DeviceGroup { get; set; }
