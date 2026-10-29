@@ -19,11 +19,16 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
 
   const handleDeleteConfirm = async () => {
     if (!systemToDelete) return;
+    const sysId = systemToDelete.id ?? systemToDelete.Id;
+    if (!sysId) {
+      setDeleteError('Unable to identify customer system ID.');
+      return;
+    }
     setDeleteLoading(true);
     setDeleteError(null);
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${BASE_URL}/dashboard/systems/${systemToDelete.id}`, {
+      const response = await fetch(`${BASE_URL}/dashboard/systems/${sysId}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -31,13 +36,18 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
       });
       if (response.ok) {
         setSystemToDelete(null);
-        refreshData();
+        if (typeof refreshData === 'function') refreshData();
       } else {
         const errText = await response.text();
-        setDeleteError(errText || 'Failed to delete customer.');
+        let errMsg = errText;
+        try {
+          const parsed = JSON.parse(errText);
+          errMsg = parsed.message || parsed.title || errText;
+        } catch {}
+        setDeleteError(errMsg || `Server returned error (${response.status})`);
       }
     } catch (err) {
-      setDeleteError('Network error while deleting system.');
+      setDeleteError('Network error while deleting system: ' + (err.message || ''));
     } finally {
       setDeleteLoading(false);
     }

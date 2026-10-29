@@ -131,7 +131,14 @@ namespace SolarPaygo.Api.Services
                 }
 
                 // Check every 1 minute
-                await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
+                try
+                {
+                    await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
+                }
+                catch (TaskCanceledException)
+                {
+                    break;
+                }
             }
         }
     }
