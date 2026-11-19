@@ -1,4 +1,4 @@
-﻿import InvestorAdminSection from '../components/InvestorAdminSection';
+import InvestorAdminSection from '../components/InvestorAdminSection';
 import React, { useState, useEffect } from 'react';
 import { Search, Lock, Unlock, MinusCircle, CreditCard, Plus, Activity, User, ShieldAlert, BadgeCheck, Phone, Mail, FileText, Coins, Power, Key, Trash2 } from 'lucide-react';
 import { BASE_URL } from '../config';
