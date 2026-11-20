@@ -298,6 +298,47 @@ using (var scope = app.Services.CreateScope())
                 ALTER TABLE SolarSystems ADD DeletedAt DATETIME2 NULL;
             END
 
+            -- Idiasco Loan Financing Scheme Columns (Additive & Optional)
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('SolarSystems') AND name = 'IsLoanFinanced')
+            BEGIN
+                ALTER TABLE SolarSystems ADD IsLoanFinanced BIT NOT NULL DEFAULT 0;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('SolarSystems') AND name = 'TotalProductCost')
+            BEGIN
+                ALTER TABLE SolarSystems ADD TotalProductCost DECIMAL(18,2) NULL;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('SolarSystems') AND name = 'LoanedCapital')
+            BEGIN
+                ALTER TABLE SolarSystems ADD LoanedCapital DECIMAL(18,2) NULL;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('SolarSystems') AND name = 'MonthlyLoanInterestPercent')
+            BEGIN
+                ALTER TABLE SolarSystems ADD MonthlyLoanInterestPercent DECIMAL(18,2) NOT NULL DEFAULT 10.00;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('SolarSystems') AND name = 'AutoRelayCutOnUnmetQuota')
+            BEGIN
+                ALTER TABLE SolarSystems ADD AutoRelayCutOnUnmetQuota BIT NOT NULL DEFAULT 0;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('SolarSystems') AND name = 'AccumulatedDailyPenalty')
+            BEGIN
+                ALTER TABLE SolarSystems ADD AccumulatedDailyPenalty DECIMAL(18,2) NOT NULL DEFAULT 0;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('SolarSystems') AND name = 'LastPenaltyAccrualDate')
+            BEGIN
+                ALTER TABLE SolarSystems ADD LastPenaltyAccrualDate DATETIME2 NULL;
+            END
+
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('SolarSystems') AND name = 'IsRepossessionFlagged')
+            BEGIN
+                ALTER TABLE SolarSystems ADD IsRepossessionFlagged BIT NOT NULL DEFAULT 0;
+            END
+
             IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('GeneratorCapacities') AND name = 'OverloadThresholdPercent')
             BEGIN
                 ALTER TABLE GeneratorCapacities ADD OverloadThresholdPercent INT NOT NULL DEFAULT 90;
