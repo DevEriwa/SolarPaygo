@@ -81,6 +81,8 @@ namespace SolarPaygo.Api.Controllers
                 s.Voltage, s.Current, s.Power, s.RelayState, s.CoverState, s.IsOverloaded,
                 s.GeneratorCapacity,
                 s.AgreementMonths, s.AgreementStartDate, s.PricePlanId,
+                s.IsLoanFinanced, s.TotalProductCost, s.LoanedCapital, s.MonthlyLoanInterestPercent,
+                s.AutoRelayCutOnUnmetQuota, s.AccumulatedDailyPenalty, s.LastPenaltyAccrualDate, s.IsRepossessionFlagged,
                 PricePlan = s.PricePlan == null ? null : new {
                     s.PricePlan.Id, s.PricePlan.Band, s.PricePlan.Name, s.PricePlan.PricePerKwh,
                     s.PricePlan.LoyaltyDiscountEnabled, s.PricePlan.LoyaltyThresholdKwh, s.PricePlan.LoyaltyDiscountPercent,
@@ -663,6 +665,94 @@ namespace SolarPaygo.Api.Controllers
         public class UpdateAgreementMonthsRequest
         {
             public int AgreementMonths { get; set; } = 12;
+        }
+
+        public class UpdateLoanConfigRequest
+        {
+            public bool IsLoanFinanced { get; set; }
+            public decimal? TotalProductCost { get; set; }
+            public decimal? LoanedCapital { get; set; }
+            public decimal MonthlyLoanInterestPercent { get; set; } = 10.0M;
+            public bool AutoRelayCutOnUnmetQuota { get; set; }
+            public int? AgreementMonths { get; set; }
+        }
+
+        [Authorize(Roles = "Admin,SuperAdmin")]
+        [HttpPost("systems/{id}/loan-config")]
+        public async Task<IActionResult> UpdateLoanConfig(int id, [FromBody] UpdateLoanConfigRequest req)
+        {
+            var system = await _context.SolarSystems.FindAsync(id);
+            if (system == null) return NotFound("System not found.");
+
+            system.IsLoanFinanced = req.IsLoanFinanced;
+            system.TotalProductCost = req.TotalProductCost;
+            system.LoanedCapital = req.LoanedCapital;
+            if (req.MonthlyLoanInterestPercent > 0)
+            {
+                system.MonthlyLoanInterestPercent = req.MonthlyLoanInterestPercent;
+            }
+            system.AutoRelayCutOnUnmetQuota = req.AutoRelayCutOnUnmetQuota;
+
+            if (req.AgreementMonths.HasValue && req.AgreementMonths.Value > 0)
+            {
+                system.AgreementMonths = req.AgreementMonths.Value;
+                if (!system.AgreementStartDate.HasValue)
+                {
+                    system.AgreementStartDate = DateTime.UtcNow;
+                }
+            }
+
+            await _context.SaveChangesAsync();
+
+            _logger.LogInformation("[LoanConfig] Admin updated loan config for system {HardwareId}: LoanFinanced={IsLoanFinanced}, Cost={Cost}, Loan={Loan}, AutoCut={AutoCut}",
+                system.HardwareId, system.IsLoanFinanced, system.TotalProductCost, system.LoanedCapital, system.AutoRelayCutOnUnmetQuota);
+
+            return Ok(new {
+                success = true,
+                message = "Loan financing configuration saved successfully.",
+                system.IsLoanFinanced,
+                system.TotalProductCost,
+                system.LoanedCapital,
+                system.MonthlyLoanInterestPercent,
+                system.AutoRelayCutOnUnmetQuota,
+                system.AgreementMonths,
+                system.IsRepossessionFlagged
+            });
+        }
+
+        /// <summary>
+        /// Retrieves detailed loan summary calculations for a system (total cost, loaned capital, interest,
+        /// repayment progress, current month top-up vs monthly quota, penalties, and repossession status).
+        /// </summary>
+        [Authorize(Roles = "Admin,SuperAdmin")]
+        [HttpGet("systems/{id}/loan-summary")]
+        public async Task<IActionResult> GetLoanSummary(int id)
+        {
+            var system = await _context.SolarSystems.FindAsync(id);
+            if (system == null) return NotFound("System not found.");
+
+            // Sum all completed payments for this system
+            decimal totalPaid = await _context.Transactions
+                .Where(t => t.SolarSystemId == id && t.Status == "Completed")
+                .SumAsync(t => t.AmountPaid);
+
+            // Compute current month payments (past 30 days or current calendar month)
+            var currentMonthStart = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
+            decimal currentMonthPaid = await _context.Transactions
+                .Where(t => t.SolarSystemId == id && t.Status == "Completed" && t.TransactionDate >= currentMonthStart)
+                .SumAsync(t => t.AmountPaid);
+
+            var summary = LoanContractService.CalculateLoanSummary(system, totalPaid, currentMonthPaid);
+
+            return Ok(new {
+                system.Id,
+                system.HardwareId,
+                system.OwnerName,
+                system.IsLoanFinanced,
+                system.AutoRelayCutOnUnmetQuota,
+                system.RelayState,
+                Loan = summary
+            });
         }
 
         [Authorize(Roles = "Admin,SuperAdmin")]

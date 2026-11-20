@@ -77,5 +77,16 @@ namespace SolarPaygo.Api.Models
         // Assigned Device Group/Tab. Null means Ungrouped / default view.
         public int? DeviceGroupId { get; set; }
         public DeviceGroup? DeviceGroup { get; set; }
+
+        // --- IDIASCO EXTERNAL LOAN FINANCING SCHEME (OPTIONAL) ---
+        // For external products where customer couldn't pay full amount and Idiasco loaned capital.
+        public bool IsLoanFinanced { get; set; } = false;
+        public decimal? TotalProductCost { get; set; } // e.g. 2,500,000 NGN
+        public decimal? LoanedCapital { get; set; } // e.g. 1,000,000 NGN loaned by Idiasco
+        public decimal MonthlyLoanInterestPercent { get; set; } = 10.0M; // 10% monthly interest on loaned capital
+        public bool AutoRelayCutOnUnmetQuota { get; set; } = false; // When true: at month end, cut relay if monthly quota unmet; auto-close when quota paid
+        public decimal AccumulatedDailyPenalty { get; set; } = 0.0M; // 1% daily penalty accumulated on unpaid balance after agreement duration + 1 day grace
+        public DateTime? LastPenaltyAccrualDate { get; set; } // Tracks the last day 1% penalty was accrued
+        public bool IsRepossessionFlagged { get; set; } = false; // Triggered when remaining unpaid balance + penalties >= TotalProductCost
     }
 }
