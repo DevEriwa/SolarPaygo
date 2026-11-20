@@ -98,6 +98,16 @@ namespace SolarPaygo.Api.Services
                 {
                     _logger.LogInformation("[DailyReset] No systems needed resetting (already reset today).");
                 }
+
+                // 2. Evaluate loan contract daily penalties and repossession checks
+                try
+                {
+                    await LoanContractService.EvaluateDailyPenaltiesAsync(db, _logger, cancellationToken);
+                }
+                catch (Exception loanEx)
+                {
+                    _logger.LogError(loanEx, "[DailyReset] Error during loan contract penalty evaluation.");
+                }
             }
             catch (Exception ex)
             {

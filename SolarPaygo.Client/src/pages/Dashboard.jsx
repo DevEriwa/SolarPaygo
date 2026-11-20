@@ -1,4 +1,4 @@
-﻿import InvestorAdminSection from '../components/InvestorAdminSection';
+import InvestorAdminSection from '../components/InvestorAdminSection';
 import React, { useState, useEffect } from 'react';
 import { Search, Lock, Unlock, MinusCircle, CreditCard, Plus, Activity, User, ShieldAlert, BadgeCheck, Phone, Mail, FileText, Coins, Power, Key, Trash2 } from 'lucide-react';
 import { BASE_URL } from '../config';
@@ -124,6 +124,37 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
   const [regAgreementMonths, setRegAgreementMonths] = useState(12);
   const [updatingMonths, setUpdatingMonths] = useState({});
   const [monthSuccess, setMonthSuccess] = useState({});
+
+  // Loan Financing Configuration State
+  const [updatingLoanConfig, setUpdatingLoanConfig] = useState({});
+  const [loanConfigSuccess, setLoanConfigSuccess] = useState({});
+  const [loanConfigError, setLoanConfigError] = useState({});
+
+  const handleUpdateLoanConfig = async (sysId, configData) => {
+    setUpdatingLoanConfig(prev => ({ ...prev, [sysId]: true }));
+    setLoanConfigSuccess(prev => ({ ...prev, [sysId]: null }));
+    setLoanConfigError(prev => ({ ...prev, [sysId]: null }));
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${BASE_URL}/dashboard/systems/${sysId}/loan-config`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(configData)
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setLoanConfigSuccess(prev => ({ ...prev, [sysId]: 'Loan config saved successfully!' }));
+        setTimeout(() => setLoanConfigSuccess(prev => ({ ...prev, [sysId]: null })), 4000);
+        if (typeof refreshData === 'function') refreshData();
+      } else {
+        setLoanConfigError(prev => ({ ...prev, [sysId]: data.message || 'Failed to save loan config.' }));
+      }
+    } catch {
+      setLoanConfigError(prev => ({ ...prev, [sysId]: 'Network error saving loan config.' }));
+    } finally {
+      setUpdatingLoanConfig(prev => ({ ...prev, [sysId]: false }));
+    }
+  };
   const [recycleBin, setRecycleBin] = useState([]);
   const [recycleBinLoading, setRecycleBinLoading] = useState(false);
   const [restoreLoading, setRestoreLoading] = useState({});
@@ -902,7 +933,48 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
 
                     {/* Row actions */}
                     <td>
-                      <div className="action-buttons" style={{ display: 'flex', gap: '8px' }}>
+                      <div className="action-buttons" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        {/* Open Relay Condition Badge for Loan Customers */}
+                        {sys.autoRelayCutOnUnmetQuota && (
+                          <span 
+                            title="Open Relay Condition: Power cuts at month end if monthly quota is not met until topped up."
+                            style={{ 
+                              background: 'rgba(239, 68, 68, 0.15)', 
+                              color: '#ef4444', 
+                              border: '1px solid rgba(239, 68, 68, 0.4)', 
+                              padding: '4px 8px', 
+                              borderRadius: '4px', 
+                              fontSize: '0.72rem', 
+                              fontWeight: 700,
+                              whiteSpace: 'nowrap',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                          >
+                            ⚠️ Open Relay
+                          </span>
+                        )}
+
+                        {/* Asset Repossession Flag */}
+                        {sys.isRepossessionFlagged && (
+                          <span 
+                            title="Asset Repossession Flag: Remaining balance + daily penalties has reached or exceeded Total Product Cost. Retrieve equipment."
+                            style={{ 
+                              background: '#ef4444', 
+                              color: 'white', 
+                              padding: '4px 8px', 
+                              borderRadius: '4px', 
+                              fontSize: '0.72rem', 
+                              fontWeight: 800,
+                              whiteSpace: 'nowrap',
+                              animation: 'pulse 2s infinite'
+                            }}
+                          >
+                            🚨 REPOSSESSION
+                          </span>
+                        )}
+
                         {relayLoading === sys.id ? (
                           <button className="action-btn" style={{ padding: '6px 12px', opacity: 0.6 }} disabled>
                             ⏳ Sending...
@@ -1068,6 +1140,124 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
                               {monthSuccess[sys.id] && (
                                 <div style={{ fontSize: '0.75rem', color: 'var(--success)', marginTop: '4px' }}>{monthSuccess[sys.id]}</div>
                               )}
+                            </div>
+
+                            {/* ── IDIASCO LOAN FINANCING CONFIGURATION (OPTIONAL FOR EXTERNAL PRODUCTS) ── */}
+                            <div style={{ marginTop: '12px', background: 'rgba(59, 130, 246, 0.04)', border: '1px solid rgba(59, 130, 246, 0.25)', borderRadius: '6px', padding: '12px' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                <div style={{ fontSize: '0.8rem', color: '#60a5fa', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                  💰 External Solar Loan Financing
+                                </div>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.78rem', color: 'white', cursor: 'pointer' }}>
+                                  <input 
+                                    type="checkbox" 
+                                    id={`loan-enabled-${sys.id}`}
+                                    defaultChecked={!!sys.isLoanFinanced}
+                                  />
+                                  <span>Enable Loan Scheme</span>
+                                </label>
+                              </div>
+
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
+                                <div>
+                                  <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '3px' }}>Total Product Value (₦)</label>
+                                  <input
+                                    type="number"
+                                    id={`loan-product-cost-${sys.id}`}
+                                    defaultValue={sys.totalProductCost || ''}
+                                    placeholder="e.g. 2500000"
+                                    style={{ width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.82rem' }}
+                                  />
+                                </div>
+                                <div>
+                                  <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '3px' }}>Idiasco Loan Capital (₦)</label>
+                                  <input
+                                    type="number"
+                                    id={`loan-capital-${sys.id}`}
+                                    defaultValue={sys.loanedCapital || ''}
+                                    placeholder="e.g. 1000000"
+                                    style={{ width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.82rem' }}
+                                  />
+                                </div>
+                              </div>
+
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '10px' }}>
+                                <div>
+                                  <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '3px' }}>Monthly Interest (%)</label>
+                                  <input
+                                    type="number"
+                                    step="0.5"
+                                    id={`loan-interest-${sys.id}`}
+                                    defaultValue={sys.monthlyLoanInterestPercent || 10.0}
+                                    style={{ width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.82rem' }}
+                                  />
+                                </div>
+                                <div>
+                                  <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '3px' }}>Agreement Months</label>
+                                  <input
+                                    type="number"
+                                    id={`loan-months-${sys.id}`}
+                                    defaultValue={sys.agreementMonths || 6}
+                                    style={{ width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-dark)', color: 'white', fontSize: '0.82rem' }}
+                                  />
+                                </div>
+                              </div>
+
+                              <div style={{ marginBottom: '10px', background: 'rgba(0,0,0,0.2)', padding: '8px', borderRadius: '4px' }}>
+                                <label style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', fontSize: '0.74rem', color: '#fca5a5', cursor: 'pointer' }}>
+                                  <input 
+                                    type="checkbox" 
+                                    id={`loan-autocut-${sys.id}`}
+                                    defaultChecked={!!sys.autoRelayCutOnUnmetQuota}
+                                    style={{ marginTop: '2px' }}
+                                  />
+                                  <span><strong>Auto Relay Cutoff:</strong> If customer doesn't meet monthly quota, switch relay OFF at month end until quota is topped up.</span>
+                                </label>
+                              </div>
+
+                              {/* Repossession / default warning banner if flagged */}
+                              {sys.isRepossessionFlagged && (
+                                <div style={{ background: 'rgba(239,68,68,0.2)', border: '1px solid #ef4444', borderRadius: '4px', padding: '8px', color: '#fca5a5', fontSize: '0.75rem', fontWeight: 600, marginBottom: '10px' }}>
+                                  🚨 REPOSSESSION NOTICE: Unpaid balance + 1% daily penalties has reached or exceeded product value. Total ownership retained by Idiasco. Equipment should be retrieved.
+                                </div>
+                              )}
+
+                              {loanConfigSuccess[sys.id] && (
+                                <div style={{ color: 'var(--success)', fontSize: '0.75rem', marginBottom: '8px' }}>
+                                  {loanConfigSuccess[sys.id]}
+                                </div>
+                              )}
+                              {loanConfigError[sys.id] && (
+                                <div style={{ color: 'var(--danger)', fontSize: '0.75rem', marginBottom: '8px' }}>
+                                  {loanConfigError[sys.id]}
+                                </div>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const isEnabled = document.getElementById(`loan-enabled-${sys.id}`)?.checked ?? false;
+                                  const prodCost = document.getElementById(`loan-product-cost-${sys.id}`)?.value;
+                                  const capital = document.getElementById(`loan-capital-${sys.id}`)?.value;
+                                  const interest = document.getElementById(`loan-interest-${sys.id}`)?.value;
+                                  const months = document.getElementById(`loan-months-${sys.id}`)?.value;
+                                  const autoCut = document.getElementById(`loan-autocut-${sys.id}`)?.checked ?? false;
+
+                                  handleUpdateLoanConfig(sys.id, {
+                                    isLoanFinanced: isEnabled,
+                                    totalProductCost: prodCost ? parseFloat(prodCost) : null,
+                                    loanedCapital: capital ? parseFloat(capital) : null,
+                                    monthlyLoanInterestPercent: interest ? parseFloat(interest) : 10.0,
+                                    agreementMonths: months ? parseInt(months, 10) : 6,
+                                    autoRelayCutOnUnmetQuota: autoCut
+                                  });
+                                }}
+                                disabled={updatingLoanConfig[sys.id]}
+                                className="action-btn"
+                                style={{ width: '100%', padding: '7px 14px', background: '#3b82f6', borderColor: '#3b82f6', color: 'white', fontSize: '0.8rem', fontWeight: 600 }}
+                              >
+                                {updatingLoanConfig[sys.id] ? 'Saving...' : '💾 Save Loan Financing Settings'}
+                              </button>
                             </div>
 
                             {/* ── DANGER ZONE: Delete (inside panel, not exposed on table row) ── */}
@@ -1573,9 +1763,60 @@ export default function Dashboard({ dashboardData, loading, refreshData, pricePl
 
                               {/* Payment history */}
                               <div>
-                                <h3 style={{ color: 'white', marginBottom: '16px', fontSize: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  💳 Transaction & STS Token History
+                                <h3 style={{ color: 'white', marginBottom: '16px', fontSize: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                  <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    💳 Transaction & STS Token History
+                                  </span>
+                                  {sys.isLoanFinanced && sys.loanedCapital > 0 && (
+                                    <div style={{ display: 'flex', gap: '8px', fontSize: '0.75rem', fontWeight: 'normal' }}>
+                                      {sys.totalProductCost > 0 && (
+                                        <span style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '2px 8px', borderRadius: '4px', fontWeight: 600 }}>
+                                          Total Value: {formatNaira(sys.totalProductCost)}
+                                        </span>
+                                      )}
+                                      <span style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)', padding: '2px 8px', borderRadius: '4px', fontWeight: 600 }}>
+                                        Loan Capital: {formatNaira(sys.loanedCapital)}
+                                      </span>
+                                    </div>
+                                  )}
                                 </h3>
+
+                                {/* Loan Progress Bar & Deficit Indicator */}
+                                {sys.isLoanFinanced && sys.loanedCapital > 0 && (() => {
+                                  const months = sys.agreementMonths || 6;
+                                  const interestRate = sys.monthlyLoanInterestPercent || 10;
+                                  const totalRequired = sys.loanedCapital * (1 + (interestRate / 100 * months));
+                                  const totalPaid = txs.reduce((acc, t) => acc + (t.status === 'Completed' ? (t.amountPaid || 0) : 0), 0);
+                                  const remaining = Math.max(0, totalRequired - totalPaid);
+                                  const percentPaid = Math.min(100, (totalPaid / totalRequired) * 100);
+                                  const monthlyTarget = totalRequired / months;
+                                  const penalties = sys.accumulatedDailyPenalty || 0;
+                                  const totalOwed = remaining + penalties;
+
+                                  return (
+                                    <div style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '10px 12px', marginBottom: '12px' }}>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.78rem', marginBottom: '6px' }}>
+                                        <span style={{ color: 'var(--text-muted)' }}>
+                                          Loan Progress: <strong style={{ color: 'white' }}>{formatNaira(totalPaid)}</strong> / {formatNaira(totalRequired)} ({percentPaid.toFixed(1)}%)
+                                        </span>
+                                        <span style={{ color: remaining > 0 ? '#f59e0b' : 'var(--success)', fontWeight: 600 }}>
+                                          Remaining: {formatNaira(remaining)}
+                                        </span>
+                                      </div>
+                                      <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden', marginBottom: '6px' }}>
+                                        <div style={{ width: `${percentPaid}%`, height: '100%', background: percentPaid >= 100 ? 'var(--success)' : '#3b82f6', borderRadius: '3px', transition: 'width 0.3s' }}></div>
+                                      </div>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                                        <span>🎯 Monthly Target: <strong style={{ color: '#60a5fa' }}>{formatNaira(monthlyTarget)}/mo</strong> ({months} mos)</span>
+                                        {penalties > 0 && (
+                                          <span style={{ color: '#ef4444', fontWeight: 600 }}>
+                                            ⚠️ 1% Daily Penalties: +{formatNaira(penalties)} (Total Owed: {formatNaira(totalOwed)})
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
                                 {txsLoading ? (
                                   <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', padding: '20px 0' }}>⏳ Fetching records from payment gateway...</div>
                                 ) : txs.length === 0 ? (
